@@ -40,7 +40,7 @@
 #endif
 
 #include <pthread.h>
-
+#include <MQTTClient.h>
 #include "rtl-sdr.h"
 #include "convenience/convenience.h"
 
