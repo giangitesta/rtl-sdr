@@ -88,19 +88,24 @@ endif()
 ########################################################################
 add_executable(rtl_sdr rtl_sdr.c)
 add_executable(rtl_tcp rtl_tcp.c)
+add_executable(rtl_tcp_mqtt rtl_tcp_mqtt.c)
 add_executable(rtl_test rtl_test.c)
 add_executable(rtl_fm rtl_fm.c)
 add_executable(rtl_eeprom rtl_eeprom.c)
 add_executable(rtl_adsb rtl_adsb.c)
 add_executable(rtl_power rtl_power.c)
 add_executable(rtl_biast rtl_biast.c)
-set(INSTALL_TARGETS rtlsdr rtlsdr_static rtl_sdr rtl_tcp rtl_test rtl_fm rtl_eeprom rtl_adsb rtl_power rtl_biast)
+set(INSTALL_TARGETS rtlsdr rtlsdr_static rtl_sdr rtl_tcp rtl_tcp_mqtt rtl_test rtl_fm rtl_eeprom rtl_adsb rtl_power rtl_biast)
 
 target_link_libraries(rtl_sdr rtlsdr convenience_static
     ${LIBUSB_LIBRARIES}
     ${CMAKE_THREAD_LIBS_INIT}
 )
 target_link_libraries(rtl_tcp rtlsdr convenience_static
+    ${LIBUSB_LIBRARIES}
+    ${CMAKE_THREAD_LIBS_INIT}
+)
+target_link_libraries(rtl_tcp_mqtt rtlsdr convenience_static paho-mqtt3c
     ${LIBUSB_LIBRARIES}
     ${CMAKE_THREAD_LIBS_INIT}
 )
@@ -166,6 +171,6 @@ install(TARGETS rtlsdr EXPORT RTLSDR-export
 install(TARGETS rtlsdr_static EXPORT RTLSDR-export
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} # .so/.dylib file
   )
-install(TARGETS rtl_sdr rtl_tcp rtl_test rtl_fm rtl_eeprom rtl_adsb rtl_power rtl_biast
+install(TARGETS rtl_sdr rtl_tcp rtl_tcp_mqtt rtl_test rtl_fm rtl_eeprom rtl_adsb rtl_power rtl_biast
   DESTINATION ${CMAKE_INSTALL_BINDIR}
   )
