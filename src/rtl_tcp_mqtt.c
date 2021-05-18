@@ -101,7 +101,9 @@ void usage(void)
 		"\t[-P ppm_error (default: 0)]\n"
 		"\t[-T enable bias-T on GPIO PIN 0 (works for rtl-sdr.com v3 dongles)]\n"
 		"\t[-h Mqtt broker address]\n"
-		"\t[-x Mqtt broker port]\n");
+		"\t[-x Mqtt broker port]\n"
+		"\t[-t Mqtt topic]\n"
+		"\t[-c Mqtt client ID]\n");
 	exit(1);
 }
 
