@@ -87,6 +87,11 @@ static int llbuf_num = 500;
 
 static volatile int do_exit = 0;
 
+static char * mqtt_addr = "127.0.0.1";
+static char * mqtt_port = "1883";
+static char * mqtt_topic = "home/rtl_tcp/radio1";
+static char * mqtt_client_id = "client_1234";
+
 void usage(void)
 {
 	printf("rtl_tcp, an I/Q spectrum server for RTL2832 based DVB-T receivers\n\n"
