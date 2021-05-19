@@ -613,9 +613,9 @@ int main(int argc, char **argv)
   	        "{ \"device_id\" : %d , \
 			   \"frequency\" : %d , \
 			   \"gain\" : %d , \
-			   \"sample rate\" : %d , \ 
-			   \"ppm error\" : %d }" 
-			   , dev_index, frequency, gain, samp_rate, ppm_error);
+			   \"sample rate\" : %d , \
+			   \"ppm error\" : %d }", 
+			   dev_index, frequency, gain, samp_rate, ppm_error);
 
 	pubmsg.payload = buff;
 	pubmsg.payloadlen = (int)strlen(buff);
