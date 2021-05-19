@@ -87,6 +87,18 @@ static int llbuf_num = 500;
 
 static volatile int do_exit = 0;
 
+
+typedef struct {
+	int device_index;
+	char *device_name;
+	uint32_t frequency;
+	uint32_t samp_rate;
+	int gain;
+	int ppm_error;
+} radio_state_t;
+
+static radio_state_t *radio_state = NULL;
+
 static char *mqtt_addr = "tcp://localhost:1883";
 static char *mqtt_topic = "home/rtl_tcp/radio1";
 static char *mqtt_client_id = "client_1234";
