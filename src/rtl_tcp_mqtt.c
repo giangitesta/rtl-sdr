@@ -87,10 +87,10 @@ static int llbuf_num = 500;
 
 static volatile int do_exit = 0;
 
-static char * mqtt_addr = "127.0.0.1";
-static char * mqtt_port = "1883";
-static char * mqtt_topic = "home/rtl_tcp/radio1";
-static char * mqtt_client_id = "client_1234";
+static char *mqtt_addr = "127.0.0.1";
+static char *mqtt_port = "1883";
+static char *mqtt_topic = "home/rtl_tcp/radio1";
+static char *mqtt_client_id = "client_1234";
 
 void usage(void)
 {
@@ -448,6 +448,9 @@ int main(int argc, char **argv)
 			break;
 		case 'T':
 			enable_biastee = 1;
+			break;
+		case 'h':
+			mqtt_addr = strdup(optarg);
 			break;
 		default:
 			usage();
