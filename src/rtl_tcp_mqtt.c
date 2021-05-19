@@ -429,7 +429,7 @@ int main(int argc, char **argv)
 	MQTTClient_message pubmsg = MQTTClient_message_initializer;
 	MQTTClient_deliveryToken token;
 	
-	int rc
+	int rc;
 
 #ifdef _WIN32
 	WSADATA wsd;
