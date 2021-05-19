@@ -87,10 +87,15 @@ static int llbuf_num = 500;
 
 static volatile int do_exit = 0;
 
-static char *mqtt_addr = "127.0.0.1";
-static char *mqtt_port = "1883";
+static char *mqtt_addr = "tcp://localhost:1883";
 static char *mqtt_topic = "home/rtl_tcp/radio1";
 static char *mqtt_client_id = "client_1234";
+
+static MQTTClient mqtt_client;
+static MQTTClient_connectOptions conn_opts = MQTTClient_connectOptions_initializer;
+
+
+
 
 void usage(void)
 {
@@ -106,7 +111,6 @@ void usage(void)
 		"\t[-P ppm_error (default: 0)]\n"
 		"\t[-T enable bias-T on GPIO PIN 0 (works for rtl-sdr.com v3 dongles)]\n"
 		"\t[-h Mqtt broker address]\n"
-		"\t[-x Mqtt broker port]\n"
 		"\t[-t Mqtt topic]\n"
 		"\t[-c Mqtt client ID]\n");
 	exit(1);
@@ -409,6 +413,12 @@ int main(int argc, char **argv)
 	fd_set readfds;
 	u_long blockmode = 1;
 	dongle_info_t dongle_info;
+
+	MQTTClient_message pubmsg = MQTTClient_message_initializer;
+	MQTTClient_deliveryToken token;
+	
+	int rc
+
 #ifdef _WIN32
 	WSADATA wsd;
 	i = WSAStartup(MAKEWORD(2,2), &wsd);
@@ -449,6 +459,15 @@ int main(int argc, char **argv)
 		case 'T':
 			enable_biastee = 1;
 			break;
+		case 'h':
+			mqtt_addr = strdup(optarg);
+			break;
+		case 't':
+			mqtt_topic = strdup(optarg);
+			break;
+		case 'c':
+			mqtt_client_id = strdup(optarg);
+			break;						
 		default:
 			usage();
 			break;
@@ -571,6 +590,42 @@ int main(int argc, char **argv)
 			break;
 	}
 
+
+	if ((rc = MQTTClient_create(&mqtt_client, mqtt_addr, mqtt_client_id,
+        MQTTCLIENT_PERSISTENCE_NONE, NULL)) != MQTTCLIENT_SUCCESS)
+    {
+         fprintf(stderr, "Failed to create MQTT client, return code %d\n", rc);
+         return(-1);
+    }
+
+	conn_opts.keepAliveInterval = 20;
+    conn_opts.cleansession = 1;
+
+    if ((rc = MQTTClient_connect(mqtt_client, &conn_opts)) != MQTTCLIENT_SUCCESS)
+    {
+        fprintf(stderr, "Connection to MQTT broker failed, return code %d\n", rc);
+        return(-1);
+    }
+
+	char buff[255];
+
+	sprintf (buff, 
+  	        "{ \"device_id\" : %d , \
+			   \"frequency\" : %d , \
+			   \"gain\" : %d , \
+			   \"sample rate\" : %d , \
+			   \"ppm error\" : %d }", 
+			   dev_index, frequency, gain, samp_rate, ppm_error);
+
+	pubmsg.payload = buff;
+	pubmsg.payloadlen = (int)strlen(buff);
+	pubmsg.qos = 1;
+	pubmsg.retained = 0;
+
+    if ((rc = MQTTClient_publishMessage(mqtt_client, mqtt_topic, &pubmsg, &token)) != MQTTCLIENT_SUCCESS)
+         printf("Failed to publish MQTT message, return code %d\n", rc);
+
+
 #ifdef _WIN32
 	ioctlsocket(listensocket, FIONBIO, &blockmode);
 #else
@@ -653,6 +708,12 @@ int main(int argc, char **argv)
 	}
 
 out:
+
+    if ((rc = MQTTClient_disconnect(mqtt_client, 10000)) != MQTTCLIENT_SUCCESS)
+    	printf("Failed to MQTT disconnect, return code %d\n", rc);
+		
+    MQTTClient_destroy(&mqtt_client);
+
 	rtlsdr_close(dev);
 	closesocket(listensocket);
 	closesocket(s);
