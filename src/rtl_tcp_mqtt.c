@@ -711,6 +711,7 @@ out:
 
     if ((rc = MQTTClient_disconnect(mqtt_client, 10000)) != MQTTCLIENT_SUCCESS)
     	printf("Failed to MQTT disconnect, return code %d\n", rc);
+		
     MQTTClient_destroy(&mqtt_client);
 
 	rtlsdr_close(dev);
