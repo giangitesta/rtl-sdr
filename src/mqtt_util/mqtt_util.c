@@ -28,7 +28,7 @@
 
 
 
-void connlost(void *context, char *cause)
+void onConnectionLost(void *context, char *cause)
 {
         MQTTAsync client = (MQTTAsync)context;
         MQTTAsync_connectOptions conn_opts = MQTTAsync_connectOptions_initializer;
@@ -89,8 +89,8 @@ void onConnect(void* context, MQTTAsync_successData* response)
 
 void onConnectFailure(void* context, MQTTAsync_failureData* response)
 {
-    printf("Connect failed, rc %d\n", response ? response->code : 0);
-
+    //printf("Connect failed, rc %d\n", response ? response->code : 0);
+    fprintf(stderr, "Connect failed, code: %d\n", response ? response->code : 0);
 }
 
 

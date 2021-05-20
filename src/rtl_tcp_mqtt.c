@@ -500,7 +500,7 @@ int main(int argc, char **argv)
 
 	rtlsdr_open(&dev, (uint32_t)dev_index);
 	if (NULL == dev) {
-	fprintf(stderr, "Failed to open rtlsdr device #%d.\n", dev_index);
+		fprintf(stderr, "Failed to open rtlsdr device #%d.\n", dev_index);
 		exit(1);
 	}
 
@@ -603,11 +603,9 @@ int main(int argc, char **argv)
 			break;
 	}
 
-	printf("Test somma: %d\n", somma(2,2));
-
-
-  	MQTTAsync_create(&client, "tcp://192.168.1.11:1883", "CLIENTID", MQTTCLIENT_PERSISTENCE_NONE, NULL);
-    MQTTAsync_setCallbacks(client, NULL, connlost, NULL, NULL);
+	
+  	MQTTAsync_create(&client, "tcp://192.168.1.12:1883", "CLIENTID", MQTTCLIENT_PERSISTENCE_NONE, NULL);
+    MQTTAsync_setCallbacks(client, NULL, onConnectionLost, NULL, NULL);
     conn_opts.keepAliveInterval = 20;
     conn_opts.cleansession = 1;
     conn_opts.onSuccess = onConnect;
@@ -615,8 +613,8 @@ int main(int argc, char **argv)
     conn_opts.context = client;
     if ((rc = MQTTAsync_connect(client, &conn_opts)) != MQTTASYNC_SUCCESS)
     {
-        printf("Failed to start connect, return code %d\n", rc);
-        exit(EXIT_FAILURE);
+		fprintf(stderr, "Failed to start MQTT connection, return code %d\n", rc);
+        exit(1);
     }
 
 
@@ -735,7 +733,7 @@ int main(int argc, char **argv)
 
 		do_exit = 0;
 		global_numq = 0;
-	}
+	} //end while(1) Listen for TCP Connection
 
 out:
 /*
