@@ -40,9 +40,10 @@
 #endif
 
 #include <pthread.h>
-#include <MQTTClient.h>
+#include <MQTTAsync.h>
 #include "rtl-sdr.h"
 #include "convenience/convenience.h"
+#include "mqtt_util/mqtt_util.h"
 
 #ifdef _WIN32
 #pragma comment(lib, "ws2_32.lib")
@@ -103,10 +104,10 @@ static char *mqtt_addr = "tcp://localhost:1883";
 static char *mqtt_topic = "home/rtl_tcp/radio1";
 static char *mqtt_client_id = "client_1234";
 
-static MQTTClient mqtt_client;
-static MQTTClient_connectOptions conn_opts = MQTTClient_connectOptions_initializer;
-
-
+static MQTTAsync client;
+static MQTTAsync_connectOptions conn_opts = MQTTAsync_connectOptions_initializer;
+static MQTTAsync_message pubmsg = MQTTAsync_message_initializer;
+static MQTTAsync_token token;
 
 
 void usage(void)
@@ -426,8 +427,8 @@ int main(int argc, char **argv)
 	u_long blockmode = 1;
 	dongle_info_t dongle_info;
 
-	MQTTClient_message pubmsg = MQTTClient_message_initializer;
-	MQTTClient_deliveryToken token;
+//	MQTTClient_message pubmsg = MQTTClient_message_initializer;
+//	MQTTClient_deliveryToken token;
 	
 	int rc;
 
@@ -602,7 +603,24 @@ int main(int argc, char **argv)
 			break;
 	}
 
+	printf("Test somma: %d\n", somma(2,2));
 
+
+  	MQTTAsync_create(&client, "tcp://192.168.1.11:1883", "CLIENTID", MQTTCLIENT_PERSISTENCE_NONE, NULL);
+    MQTTAsync_setCallbacks(client, NULL, connlost, NULL, NULL);
+    conn_opts.keepAliveInterval = 20;
+    conn_opts.cleansession = 1;
+    conn_opts.onSuccess = onConnect;
+    conn_opts.onFailure = onConnectFailure;
+    conn_opts.context = client;
+    if ((rc = MQTTAsync_connect(client, &conn_opts)) != MQTTASYNC_SUCCESS)
+    {
+        printf("Failed to start connect, return code %d\n", rc);
+        exit(EXIT_FAILURE);
+    }
+
+
+/*
 	if ((rc = MQTTClient_create(&mqtt_client, mqtt_addr, mqtt_client_id,
         MQTTCLIENT_PERSISTENCE_NONE, NULL)) != MQTTCLIENT_SUCCESS)
     {
@@ -612,7 +630,7 @@ int main(int argc, char **argv)
 
 	conn_opts.keepAliveInterval = 20;
     conn_opts.cleansession = 1;
-
+	
     if ((rc = MQTTClient_connect(mqtt_client, &conn_opts)) != MQTTCLIENT_SUCCESS)
     {
         fprintf(stderr, "Connection to MQTT broker failed, return code %d\n", rc);
@@ -636,7 +654,7 @@ int main(int argc, char **argv)
 
     if ((rc = MQTTClient_publishMessage(mqtt_client, mqtt_topic, &pubmsg, &token)) != MQTTCLIENT_SUCCESS)
          printf("Failed to publish MQTT message, return code %d\n", rc);
-
+*/
 
 #ifdef _WIN32
 	ioctlsocket(listensocket, FIONBIO, &blockmode);
@@ -720,12 +738,14 @@ int main(int argc, char **argv)
 	}
 
 out:
-
+/*
     if ((rc = MQTTClient_disconnect(mqtt_client, 10000)) != MQTTCLIENT_SUCCESS)
     	printf("Failed to MQTT disconnect, return code %d\n", rc);
 		
     MQTTClient_destroy(&mqtt_client);
+*/
 
+ 	MQTTAsync_destroy(&client);
 	rtlsdr_close(dev);
 	closesocket(listensocket);
 	closesocket(s);

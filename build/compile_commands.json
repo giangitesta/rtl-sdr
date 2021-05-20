@@ -1,36 +1,6 @@
 [
 {
   "directory": "/home/gianluca/git_repo/rtl-sdr/build/src",
-  "command": "/usr/bin/cc -Drtlsdr_EXPORTS -I/home/gianluca/git_repo/rtl-sdr/include -I/usr/include/libusb-1.0  -g -fPIC   -Wall -Wextra -Wno-unused-parameter -Wno-unused -Wsign-compare -Wdeclaration-after-statement -fvisibility=hidden -o CMakeFiles/rtlsdr.dir/librtlsdr.c.o   -c /home/gianluca/git_repo/rtl-sdr/src/librtlsdr.c",
-  "file": "/home/gianluca/git_repo/rtl-sdr/src/librtlsdr.c"
-},
-{
-  "directory": "/home/gianluca/git_repo/rtl-sdr/build/src",
-  "command": "/usr/bin/cc -Drtlsdr_EXPORTS -I/home/gianluca/git_repo/rtl-sdr/include -I/usr/include/libusb-1.0  -g -fPIC   -Wall -Wextra -Wno-unused-parameter -Wno-unused -Wsign-compare -Wdeclaration-after-statement -fvisibility=hidden -o CMakeFiles/rtlsdr.dir/tuner_e4k.c.o   -c /home/gianluca/git_repo/rtl-sdr/src/tuner_e4k.c",
-  "file": "/home/gianluca/git_repo/rtl-sdr/src/tuner_e4k.c"
-},
-{
-  "directory": "/home/gianluca/git_repo/rtl-sdr/build/src",
-  "command": "/usr/bin/cc -Drtlsdr_EXPORTS -I/home/gianluca/git_repo/rtl-sdr/include -I/usr/include/libusb-1.0  -g -fPIC   -Wall -Wextra -Wno-unused-parameter -Wno-unused -Wsign-compare -Wdeclaration-after-statement -fvisibility=hidden -o CMakeFiles/rtlsdr.dir/tuner_fc0012.c.o   -c /home/gianluca/git_repo/rtl-sdr/src/tuner_fc0012.c",
-  "file": "/home/gianluca/git_repo/rtl-sdr/src/tuner_fc0012.c"
-},
-{
-  "directory": "/home/gianluca/git_repo/rtl-sdr/build/src",
-  "command": "/usr/bin/cc -Drtlsdr_EXPORTS -I/home/gianluca/git_repo/rtl-sdr/include -I/usr/include/libusb-1.0  -g -fPIC   -Wall -Wextra -Wno-unused-parameter -Wno-unused -Wsign-compare -Wdeclaration-after-statement -fvisibility=hidden -o CMakeFiles/rtlsdr.dir/tuner_fc0013.c.o   -c /home/gianluca/git_repo/rtl-sdr/src/tuner_fc0013.c",
-  "file": "/home/gianluca/git_repo/rtl-sdr/src/tuner_fc0013.c"
-},
-{
-  "directory": "/home/gianluca/git_repo/rtl-sdr/build/src",
-  "command": "/usr/bin/cc -Drtlsdr_EXPORTS -I/home/gianluca/git_repo/rtl-sdr/include -I/usr/include/libusb-1.0  -g -fPIC   -Wall -Wextra -Wno-unused-parameter -Wno-unused -Wsign-compare -Wdeclaration-after-statement -fvisibility=hidden -o CMakeFiles/rtlsdr.dir/tuner_fc2580.c.o   -c /home/gianluca/git_repo/rtl-sdr/src/tuner_fc2580.c",
-  "file": "/home/gianluca/git_repo/rtl-sdr/src/tuner_fc2580.c"
-},
-{
-  "directory": "/home/gianluca/git_repo/rtl-sdr/build/src",
-  "command": "/usr/bin/cc -Drtlsdr_EXPORTS -I/home/gianluca/git_repo/rtl-sdr/include -I/usr/include/libusb-1.0  -g -fPIC   -Wall -Wextra -Wno-unused-parameter -Wno-unused -Wsign-compare -Wdeclaration-after-statement -fvisibility=hidden -o CMakeFiles/rtlsdr.dir/tuner_r82xx.c.o   -c /home/gianluca/git_repo/rtl-sdr/src/tuner_r82xx.c",
-  "file": "/home/gianluca/git_repo/rtl-sdr/src/tuner_r82xx.c"
-},
-{
-  "directory": "/home/gianluca/git_repo/rtl-sdr/build/src",
   "command": "/usr/bin/cc -Drtlsdr_STATIC -I/home/gianluca/git_repo/rtl-sdr/include -I/usr/include/libusb-1.0  -g   -Wall -Wextra -Wno-unused-parameter -Wno-unused -Wsign-compare -Wdeclaration-after-statement -fvisibility=hidden -o CMakeFiles/rtlsdr_static.dir/librtlsdr.c.o   -c /home/gianluca/git_repo/rtl-sdr/src/librtlsdr.c",
   "file": "/home/gianluca/git_repo/rtl-sdr/src/librtlsdr.c"
 },
@@ -61,6 +31,51 @@
 },
 {
   "directory": "/home/gianluca/git_repo/rtl-sdr/build/src",
+  "command": "/usr/bin/cc -Drtlsdr_EXPORTS -I/home/gianluca/git_repo/rtl-sdr/include -I/usr/include/libusb-1.0  -g -fPIC   -Wall -Wextra -Wno-unused-parameter -Wno-unused -Wsign-compare -Wdeclaration-after-statement -fvisibility=hidden -o CMakeFiles/rtlsdr.dir/librtlsdr.c.o   -c /home/gianluca/git_repo/rtl-sdr/src/librtlsdr.c",
+  "file": "/home/gianluca/git_repo/rtl-sdr/src/librtlsdr.c"
+},
+{
+  "directory": "/home/gianluca/git_repo/rtl-sdr/build/src",
+  "command": "/usr/bin/cc -Drtlsdr_EXPORTS -I/home/gianluca/git_repo/rtl-sdr/include -I/usr/include/libusb-1.0  -g -fPIC   -Wall -Wextra -Wno-unused-parameter -Wno-unused -Wsign-compare -Wdeclaration-after-statement -fvisibility=hidden -o CMakeFiles/rtlsdr.dir/tuner_e4k.c.o   -c /home/gianluca/git_repo/rtl-sdr/src/tuner_e4k.c",
+  "file": "/home/gianluca/git_repo/rtl-sdr/src/tuner_e4k.c"
+},
+{
+  "directory": "/home/gianluca/git_repo/rtl-sdr/build/src",
+  "command": "/usr/bin/cc -Drtlsdr_EXPORTS -I/home/gianluca/git_repo/rtl-sdr/include -I/usr/include/libusb-1.0  -g -fPIC   -Wall -Wextra -Wno-unused-parameter -Wno-unused -Wsign-compare -Wdeclaration-after-statement -fvisibility=hidden -o CMakeFiles/rtlsdr.dir/tuner_fc0012.c.o   -c /home/gianluca/git_repo/rtl-sdr/src/tuner_fc0012.c",
+  "file": "/home/gianluca/git_repo/rtl-sdr/src/tuner_fc0012.c"
+},
+{
+  "directory": "/home/gianluca/git_repo/rtl-sdr/build/src",
+  "command": "/usr/bin/cc -Drtlsdr_EXPORTS -I/home/gianluca/git_repo/rtl-sdr/include -I/usr/include/libusb-1.0  -g -fPIC   -Wall -Wextra -Wno-unused-parameter -Wno-unused -Wsign-compare -Wdeclaration-after-statement -fvisibility=hidden -o CMakeFiles/rtlsdr.dir/tuner_fc0013.c.o   -c /home/gianluca/git_repo/rtl-sdr/src/tuner_fc0013.c",
+  "file": "/home/gianluca/git_repo/rtl-sdr/src/tuner_fc0013.c"
+},
+{
+  "directory": "/home/gianluca/git_repo/rtl-sdr/build/src",
+  "command": "/usr/bin/cc -Drtlsdr_EXPORTS -I/home/gianluca/git_repo/rtl-sdr/include -I/usr/include/libusb-1.0  -g -fPIC   -Wall -Wextra -Wno-unused-parameter -Wno-unused -Wsign-compare -Wdeclaration-after-statement -fvisibility=hidden -o CMakeFiles/rtlsdr.dir/tuner_fc2580.c.o   -c /home/gianluca/git_repo/rtl-sdr/src/tuner_fc2580.c",
+  "file": "/home/gianluca/git_repo/rtl-sdr/src/tuner_fc2580.c"
+},
+{
+  "directory": "/home/gianluca/git_repo/rtl-sdr/build/src",
+  "command": "/usr/bin/cc -Drtlsdr_EXPORTS -I/home/gianluca/git_repo/rtl-sdr/include -I/usr/include/libusb-1.0  -g -fPIC   -Wall -Wextra -Wno-unused-parameter -Wno-unused -Wsign-compare -Wdeclaration-after-statement -fvisibility=hidden -o CMakeFiles/rtlsdr.dir/tuner_r82xx.c.o   -c /home/gianluca/git_repo/rtl-sdr/src/tuner_r82xx.c",
+  "file": "/home/gianluca/git_repo/rtl-sdr/src/tuner_r82xx.c"
+},
+{
+  "directory": "/home/gianluca/git_repo/rtl-sdr/build/src",
+  "command": "/usr/bin/cc  -I/home/gianluca/git_repo/rtl-sdr/include  -g   -Wall -Wextra -Wno-unused-parameter -Wno-unused -Wsign-compare -Wdeclaration-after-statement -fvisibility=hidden -o CMakeFiles/mqtt_util_static.dir/mqtt_util/mqtt_util.c.o   -c /home/gianluca/git_repo/rtl-sdr/src/mqtt_util/mqtt_util.c",
+  "file": "/home/gianluca/git_repo/rtl-sdr/src/mqtt_util/mqtt_util.c"
+},
+{
+  "directory": "/home/gianluca/git_repo/rtl-sdr/build/src",
+  "command": "/usr/bin/cc  -I/home/gianluca/git_repo/rtl-sdr/include -I/usr/include/libusb-1.0  -g   -Wall -Wextra -Wno-unused-parameter -Wno-unused -Wsign-compare -Wdeclaration-after-statement -fvisibility=hidden -o CMakeFiles/rtl_tcp_mqtt.dir/rtl_tcp_mqtt.c.o   -c /home/gianluca/git_repo/rtl-sdr/src/rtl_tcp_mqtt.c",
+  "file": "/home/gianluca/git_repo/rtl-sdr/src/rtl_tcp_mqtt.c"
+},
+{
+  "directory": "/home/gianluca/git_repo/rtl-sdr/build/src",
+  "command": "/usr/bin/cc  -I/home/gianluca/git_repo/rtl-sdr/include -I/usr/include/libusb-1.0  -g   -Wall -Wextra -Wno-unused-parameter -Wno-unused -Wsign-compare -Wdeclaration-after-statement -fvisibility=hidden -o CMakeFiles/rtl_eeprom.dir/rtl_eeprom.c.o   -c /home/gianluca/git_repo/rtl-sdr/src/rtl_eeprom.c",
+  "file": "/home/gianluca/git_repo/rtl-sdr/src/rtl_eeprom.c"
+},
+{
+  "directory": "/home/gianluca/git_repo/rtl-sdr/build/src",
   "command": "/usr/bin/cc  -I/home/gianluca/git_repo/rtl-sdr/include -I/usr/include/libusb-1.0  -g   -Wall -Wextra -Wno-unused-parameter -Wno-unused -Wsign-compare -Wdeclaration-after-statement -fvisibility=hidden -o CMakeFiles/rtl_sdr.dir/rtl_sdr.c.o   -c /home/gianluca/git_repo/rtl-sdr/src/rtl_sdr.c",
   "file": "/home/gianluca/git_repo/rtl-sdr/src/rtl_sdr.c"
 },
@@ -78,16 +93,6 @@
   "directory": "/home/gianluca/git_repo/rtl-sdr/build/src",
   "command": "/usr/bin/cc  -I/home/gianluca/git_repo/rtl-sdr/include -I/usr/include/libusb-1.0  -g   -Wall -Wextra -Wno-unused-parameter -Wno-unused -Wsign-compare -Wdeclaration-after-statement -fvisibility=hidden -o CMakeFiles/rtl_tcp.dir/rtl_tcp.c.o   -c /home/gianluca/git_repo/rtl-sdr/src/rtl_tcp.c",
   "file": "/home/gianluca/git_repo/rtl-sdr/src/rtl_tcp.c"
-},
-{
-  "directory": "/home/gianluca/git_repo/rtl-sdr/build/src",
-  "command": "/usr/bin/cc  -I/home/gianluca/git_repo/rtl-sdr/include -I/usr/include/libusb-1.0  -g   -Wall -Wextra -Wno-unused-parameter -Wno-unused -Wsign-compare -Wdeclaration-after-statement -fvisibility=hidden -o CMakeFiles/rtl_tcp_mqtt.dir/rtl_tcp_mqtt.c.o   -c /home/gianluca/git_repo/rtl-sdr/src/rtl_tcp_mqtt.c",
-  "file": "/home/gianluca/git_repo/rtl-sdr/src/rtl_tcp_mqtt.c"
-},
-{
-  "directory": "/home/gianluca/git_repo/rtl-sdr/build/src",
-  "command": "/usr/bin/cc  -I/home/gianluca/git_repo/rtl-sdr/include -I/usr/include/libusb-1.0  -g   -Wall -Wextra -Wno-unused-parameter -Wno-unused -Wsign-compare -Wdeclaration-after-statement -fvisibility=hidden -o CMakeFiles/rtl_eeprom.dir/rtl_eeprom.c.o   -c /home/gianluca/git_repo/rtl-sdr/src/rtl_eeprom.c",
-  "file": "/home/gianluca/git_repo/rtl-sdr/src/rtl_eeprom.c"
 },
 {
   "directory": "/home/gianluca/git_repo/rtl-sdr/build/src",

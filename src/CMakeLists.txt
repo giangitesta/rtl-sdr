@@ -69,6 +69,13 @@ ENDIF(MSVC)
 ########################################################################
 # Setup libraries used in executables
 ########################################################################
+add_library(mqtt_util_static STATIC
+    mqtt_util/mqtt_util.c
+)
+target_include_directories(mqtt_util_static
+  PRIVATE ${CMAKE_SOURCE_DIR}/include)
+
+
 add_library(convenience_static STATIC
     convenience/convenience.c
 )
@@ -105,7 +112,7 @@ target_link_libraries(rtl_tcp rtlsdr convenience_static
     ${LIBUSB_LIBRARIES}
     ${CMAKE_THREAD_LIBS_INIT}
 )
-target_link_libraries(rtl_tcp_mqtt rtlsdr convenience_static paho-mqtt3c
+target_link_libraries(rtl_tcp_mqtt rtlsdr convenience_static mqtt_util_static paho-mqtt3a
     ${LIBUSB_LIBRARIES}
     ${CMAKE_THREAD_LIBS_INIT}
 )
