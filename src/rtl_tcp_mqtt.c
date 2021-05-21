@@ -94,8 +94,8 @@ typedef enum  {
 	RUNNING,
 } op_states;
 typedef struct {
-	int device_index;
-	char *device_name;
+	int dev_index;
+	char *dev_name;
 	uint32_t frequency;
 	uint32_t samp_rate;
 	int tuner_gain_mode;
@@ -119,9 +119,9 @@ typedef struct {
 
 static radio_params_t *rp = NULL;
 
-static char *mqtt_addr = "tcp://localhost:1883";
-static char *mqtt_topic = "home/rtl_tcp/radio1";
-static char *mqtt_client_id = "client_1234";
+//static char *mqtt_addr = "tcp://localhost:1883";
+//static char *mqtt_topic = "home/rtl_tcp/radio1";
+//static char *mqtt_client_id = "client_1234";
 
 /*
 static MQTTAsync client;
@@ -466,8 +466,8 @@ int main(int argc, char **argv)
 	rp->agc_mode = 0;
 	rp->enable_biastee = 0;
 	rp->client_ip = "0.0.0.0";
-	rp->device_index = 0;
-	rp->device_name = "";
+	rp->dev_index = 0;
+	rp->dev_name = "";
 	rp->direct_sampling = 0;
 	rp->gain_by_index = 0;
 	rp->offset_tuning = 0;
@@ -487,7 +487,7 @@ int main(int argc, char **argv)
 		switch (opt) {
 		case 'd':
 			//dev_index = verbose_device_search(optarg);
-			rp->device_index = verbose_device_search(optarg);
+			rp->dev_index = verbose_device_search(optarg);
 			dev_given = 1;
 			break;
 		case 'f':
@@ -521,7 +521,7 @@ int main(int argc, char **argv)
 			rp->enable_biastee = 1;
 			break;
 		case 'h':
-			rp->mqtt_addr = strdup(optarg);
+			rp->mqtt_uri = strdup(optarg);
 			break;
 		case 't':
 			rp->mqtt_topic = strdup(optarg);
@@ -539,16 +539,16 @@ int main(int argc, char **argv)
 		usage();
 
 	if (!dev_given) {
-		rp->device_index = verbose_device_search("0");
+		rp->dev_index = verbose_device_search("0");
 	}
 
-	if (dev_index < 0) {
+	if (rp->dev_index < 0) {
 	    exit(1);
 	}
 
-	rtlsdr_open(&dev, (uint32_t)dev_index);
+	rtlsdr_open(&dev, (uint32_t)rp->dev_index);
 	if (NULL == dev) {
-		fprintf(stderr, "Failed to open rtlsdr device #%d.\n", dev_index);
+		fprintf(stderr, "Failed to open rtlsdr device #%d.\n", rp->dev_index);
 		exit(1);
 	}
 
@@ -625,7 +625,7 @@ int main(int argc, char **argv)
 				 &aiHead )) != 0)
 	{
 		fprintf(stderr, "local address %s ERROR - %s.\n",
-		        addr, gai_strerror(aiErr));
+		        rp->addr, gai_strerror(aiErr));
 		return(-1);
 	}
 	memcpy(&local, aiHead->ai_addr, aiHead->ai_addrlen);
