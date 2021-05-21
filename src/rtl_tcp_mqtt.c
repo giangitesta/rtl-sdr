@@ -81,34 +81,54 @@ typedef struct { /* structure size must be multiple of 2 bytes */
 
 static rtlsdr_dev_t *dev = NULL;
 
-static int enable_biastee = 0;
+//static int enable_biastee = 0;
 static int global_numq = 0;
 static struct llist *ll_buffers = 0;
 static int llbuf_num = 500;
 
 static volatile int do_exit = 0;
 
-
+typedef enum  {
+	UNKNOW,
+	IDLE,
+	RUNNING,
+} op_states;
 typedef struct {
 	int device_index;
 	char *device_name;
 	uint32_t frequency;
 	uint32_t samp_rate;
-	int gain;
+	int tuner_gain_mode;
+	int tuner_gain;
+	int agc_mode;
+	int direct_sampling;
+	int offset_tuning;
+	int xtal_freq;
+	int gain_by_index;
+	int enable_biastee;
 	int ppm_error;
-} radio_state_t;
+	char* client_ip;
+	op_states op_state;
+	char* addr;
+	char* port;
+	char* mqtt_uri;
+	char* mqtt_topic;
+	char* mqtt_client_id;
+	int mqtt_qos;
+} radio_params_t;
 
-static radio_state_t *radio_state = NULL;
+static radio_params_t *rp = NULL;
 
 static char *mqtt_addr = "tcp://localhost:1883";
 static char *mqtt_topic = "home/rtl_tcp/radio1";
 static char *mqtt_client_id = "client_1234";
 
+/*
 static MQTTAsync client;
 static MQTTAsync_connectOptions conn_opts = MQTTAsync_connectOptions_initializer;
 static MQTTAsync_message pubmsg = MQTTAsync_message_initializer;
 static MQTTAsync_token token;
-
+*/
 
 void usage(void)
 {
@@ -399,9 +419,9 @@ static void *command_worker(void *arg)
 int main(int argc, char **argv)
 {
 	int r, opt, i;
-	char *addr = "127.0.0.1";
-	char *port = "1234";
-	uint32_t frequency = 100000000, samp_rate = 2048000;
+	//char *addr = "127.0.0.1";
+	//char *port = "1234";
+	//uint32_t frequency = 100000000, samp_rate = 2048000;
 	struct sockaddr_storage local, remote;
 	struct addrinfo *ai;
 	struct addrinfo *aiHead;
@@ -412,10 +432,10 @@ int main(int argc, char **argv)
 	char remportinfo[NI_MAXSERV];
 	int aiErr;
 	uint32_t buf_num = 0;
-	int dev_index = 0;
+	//int dev_index = 0;
 	int dev_given = 0;
-	int gain = 0;
-	int ppm_error = 0;
+	//int gain = 0;
+	//int ppm_error = 0;
 	struct llist *curelem,*prev;
 	pthread_attr_t attr;
 	void *status;
@@ -439,26 +459,54 @@ int main(int argc, char **argv)
 	struct sigaction sigact, sigign;
 #endif
 
-	while ((opt = getopt(argc, argv, "a:p:f:g:s:b:n:d:P:T")) != -1) {
+	//Radio params initialization
+	rp = (radio_params_t*) malloc(sizeof(radio_params_t)); 
+	rp->frequency = 100000000;
+	rp->samp_rate = 2048000;
+	rp->agc_mode = 0;
+	rp->enable_biastee = 0;
+	rp->client_ip = "0.0.0.0";
+	rp->device_index = 0;
+	rp->device_name = "";
+	rp->direct_sampling = 0;
+	rp->gain_by_index = 0;
+	rp->offset_tuning = 0;
+	rp->op_state = UNKNOW;
+	rp->ppm_error = 0;
+	rp->tuner_gain = 0;
+	rp->tuner_gain_mode = 0;
+	rp->xtal_freq = 0;
+	rp->addr = "127.0.0.1";
+	rp->port = "1234";
+	rp->mqtt_uri = "tcp://127.0.0.1:1883";
+	rp->mqtt_topic = "home/rtl_tcp/radio1";
+	rp->mqtt_client_id = "Client1234";
+	rp->mqtt_qos = 1;
+
+	while ((opt = getopt(argc, argv, "a:p:f:g:s:b:n:d:P:T:h:t:c")) != -1) {
 		switch (opt) {
 		case 'd':
-			dev_index = verbose_device_search(optarg);
+			//dev_index = verbose_device_search(optarg);
+			rp->device_index = verbose_device_search(optarg);
 			dev_given = 1;
 			break;
 		case 'f':
-			frequency = (uint32_t)atofs(optarg);
+			//frequency = (uint32_t)atofs(optarg);
+			rp->frequency = (uint32_t)atofs(optarg);
 			break;
 		case 'g':
-			gain = (int)(atof(optarg) * 10); /* tenths of a dB */
+			//gain = (int)(atof(optarg) * 10); /* tenths of a dB */
+			rp->tuner_gain = (int)(atof(optarg) * 10); /* tenths of a dB */
 			break;
 		case 's':
-			samp_rate = (uint32_t)atofs(optarg);
+			//samp_rate = (uint32_t)atofs(optarg);
+			rp->samp_rate  = (uint32_t)atofs(optarg);
 			break;
 		case 'a':
-		        addr = strdup(optarg);
+		    rp->addr = strdup(optarg);
 			break;
 		case 'p':
-		        port = strdup(optarg);
+		    rp->port = strdup(optarg);
 			break;
 		case 'b':
 			buf_num = atoi(optarg);
@@ -467,19 +515,19 @@ int main(int argc, char **argv)
 			llbuf_num = atoi(optarg);
 			break;
 		case 'P':
-			ppm_error = atoi(optarg);
+			rp->ppm_error = atoi(optarg);
 			break;
 		case 'T':
-			enable_biastee = 1;
+			rp->enable_biastee = 1;
 			break;
 		case 'h':
-			mqtt_addr = strdup(optarg);
+			rp->mqtt_addr = strdup(optarg);
 			break;
 		case 't':
-			mqtt_topic = strdup(optarg);
+			rp->mqtt_topic = strdup(optarg);
 			break;
 		case 'c':
-			mqtt_client_id = strdup(optarg);
+			rp->mqtt_client_id = strdup(optarg);
 			break;						
 		default:
 			usage();
@@ -491,7 +539,7 @@ int main(int argc, char **argv)
 		usage();
 
 	if (!dev_given) {
-		dev_index = verbose_device_search("0");
+		rp->device_index = verbose_device_search("0");
 	}
 
 	if (dev_index < 0) {
@@ -518,21 +566,21 @@ int main(int argc, char **argv)
 #endif
 
 	/* Set the tuner error */
-	verbose_ppm_set(dev, ppm_error);
+	verbose_ppm_set(dev, rp->ppm_error);
 
 	/* Set the sample rate */
-	r = rtlsdr_set_sample_rate(dev, samp_rate);
+	r = rtlsdr_set_sample_rate(dev, rp->samp_rate);
 	if (r < 0)
 		fprintf(stderr, "WARNING: Failed to set sample rate.\n");
 
 	/* Set the frequency */
-	r = rtlsdr_set_center_freq(dev, frequency);
+	r = rtlsdr_set_center_freq(dev, rp->frequency);
 	if (r < 0)
 		fprintf(stderr, "WARNING: Failed to set center freq.\n");
 	else
-		fprintf(stderr, "Tuned to %i Hz.\n", frequency);
+		fprintf(stderr, "Tuned to %i Hz.\n", rp->frequency);
 
-	if (0 == gain) {
+	if (0 == rp->tuner_gain) {
 		 /* Enable automatic gain */
 		r = rtlsdr_set_tuner_gain_mode(dev, 0);
 		if (r < 0)
@@ -544,15 +592,15 @@ int main(int argc, char **argv)
 			fprintf(stderr, "WARNING: Failed to enable manual gain.\n");
 
 		/* Set the tuner gain */
-		r = rtlsdr_set_tuner_gain(dev, gain);
+		r = rtlsdr_set_tuner_gain(dev, rp->tuner_gain);
 		if (r < 0)
 			fprintf(stderr, "WARNING: Failed to set tuner gain.\n");
 		else
-			fprintf(stderr, "Tuner gain set to %f dB.\n", gain/10.0);
+			fprintf(stderr, "Tuner gain set to %f dB.\n", rp->tuner_gain/10.0);
 	}
 
-	rtlsdr_set_bias_tee(dev, enable_biastee);
-	if (enable_biastee)
+	rtlsdr_set_bias_tee(dev, rp->enable_biastee);
+	if (rp->enable_biastee)
 		fprintf(stderr, "activated bias-T on GPIO PIN 0\n");
 
 	/* Reset endpoint before we start reading from it (mandatory) */
@@ -571,8 +619,8 @@ int main(int argc, char **argv)
 	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_protocol = IPPROTO_TCP;
 
-	if ((aiErr = getaddrinfo(addr,
-				 port,
+	if ((aiErr = getaddrinfo(rp->addr,
+				 rp->port,
 				 &hints,
 				 &aiHead )) != 0)
 	{
@@ -603,7 +651,7 @@ int main(int argc, char **argv)
 			break;
 	}
 
-	
+	/*
   	MQTTAsync_create(&client, "tcp://192.168.1.12:1883", "CLIENTID", MQTTCLIENT_PERSISTENCE_NONE, NULL);
     MQTTAsync_setCallbacks(client, NULL, onConnectionLost, NULL, NULL);
     conn_opts.keepAliveInterval = 20;
@@ -617,6 +665,7 @@ int main(int argc, char **argv)
         exit(1);
     }
 
+*/
 
 /*
 	if ((rc = MQTTClient_create(&mqtt_client, mqtt_addr, mqtt_client_id,
@@ -743,7 +792,7 @@ out:
     MQTTClient_destroy(&mqtt_client);
 */
 
- 	MQTTAsync_destroy(&client);
+ 	//MQTTAsync_destroy(&client);
 	rtlsdr_close(dev);
 	closesocket(listensocket);
 	closesocket(s);
