@@ -17,10 +17,6 @@
 
 /* a collection of user friendly tools */
 
-void onConnectionLost(void *context, char *cause);
-void onConnect(void* context, MQTTAsync_successData* response);
-void onConnectFailure(void* context, MQTTAsync_failureData* response);
-void onSend(void* context, MQTTAsync_successData* response);
-void onDisconnect(void* context, MQTTAsync_successData* response);
+
 
 int somma(int a, int b);

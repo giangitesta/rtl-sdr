@@ -22,6 +22,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 
 #ifndef _WIN32
 #include <unistd.h>
@@ -40,7 +41,7 @@
 #endif
 
 #include <pthread.h>
-#include <MQTTAsync.h>
+#include <MQTTClient.h>
 #include "rtl-sdr.h"
 #include "convenience/convenience.h"
 #include "mqtt_util/mqtt_util.h"
@@ -59,8 +60,14 @@ typedef int socklen_t;
 
 static SOCKET s;
 
+static pthread_t mqtt_worker_thread;
 static pthread_t tcp_worker_thread;
 static pthread_t command_thread;
+
+static pthread_cond_t pub_cond;
+static pthread_mutex_t pub_cond_lock;
+
+
 static pthread_cond_t exit_cond;
 static pthread_mutex_t exit_cond_lock;
 
@@ -120,16 +127,8 @@ typedef struct {
 
 static radio_params_t *rp = NULL;
 
-//static char *mqtt_addr = "tcp://localhost:1883";
-//static char *mqtt_topic = "home/rtl_tcp/radio1";
-//static char *mqtt_client_id = "client_1234";
-
-/*
-static MQTTAsync client;
-static MQTTAsync_connectOptions conn_opts = MQTTAsync_connectOptions_initializer;
-static MQTTAsync_message pubmsg = MQTTAsync_message_initializer;
-static MQTTAsync_token token;
-*/
+static MQTTClient mqtt_client;
+static MQTTClient_connectOptions mqtt_conn_opts = MQTTClient_connectOptions_initializer;
 
 void usage(void)
 {
@@ -144,7 +143,7 @@ void usage(void)
 		"\t[-d device index (default: 0)]\n"
 		"\t[-P ppm_error (default: 0)]\n"
 		"\t[-T enable bias-T on GPIO PIN 0 (works for rtl-sdr.com v3 dongles)]\n"
-		"\t[-h Mqtt broker address]\n"
+		"\t[-h Mqtt URI address]\n"
 		"\t[-t Mqtt topic]\n"
 		"\t[-c Mqtt client ID]\n");
 	exit(1);
@@ -234,6 +233,36 @@ void rtlsdr_callback(unsigned char *buf, uint32_t len, void *ctx)
 		}
 		pthread_cond_signal(&cond);
 		pthread_mutex_unlock(&ll_mutex);
+	}
+}
+
+static void *mqtt_worker(void *arg)
+{
+
+	u_int32_t appo_freq = 0;
+	
+	struct timeval tv= {1,0};
+	struct timespec ts;
+	struct timeval tp;
+	int r = 0;
+	
+	while(1) {
+		if(do_exit) {
+			printf("MQTT PUBS THREAD EXIT\n");
+			pthread_exit(0);
+		}
+		
+		pthread_mutex_lock(&pub_cond_lock);
+		gettimeofday(&tp, NULL);
+		ts.tv_sec  = tp.tv_sec+5;
+		ts.tv_nsec = tp.tv_usec * 1000;
+		r = pthread_cond_timedwait(&pub_cond, &pub_cond_lock, &ts);
+		if(r == ETIMEDOUT) {
+			printf("TELEMETRY\n");
+		} else if (r == 0) { //SUCCESS
+			printf("STAT\n");
+		}
+		pthread_mutex_unlock(&pub_cond_lock);
 	}
 }
 
@@ -352,11 +381,16 @@ static void *command_worker(void *arg)
 				pthread_exit(NULL);
 			}
 		}
+
+		
 		switch(cmd.cmd) {
 		case 0x01:
+			pthread_mutex_lock(&pub_cond_lock);
 			rp->frequency = ntohl(cmd.param);
 			printf("set freq %d\n", rp->frequency);
 			rtlsdr_set_center_freq(dev,rp->frequency);
+			pthread_cond_signal(&pub_cond);
+			pthread_mutex_unlock(&pub_cond_lock);
 			break;
 		case 0x02:
 			rp->samp_rate = ntohl(cmd.param);
@@ -624,6 +658,9 @@ int main(int argc, char **argv)
 	pthread_mutex_init(&exit_cond_lock, NULL);
 	pthread_mutex_init(&ll_mutex, NULL);
 	pthread_mutex_init(&exit_cond_lock, NULL);
+
+	pthread_mutex_init(&pub_cond_lock,NULL);
+
 	pthread_cond_init(&cond, NULL);
 	pthread_cond_init(&exit_cond, NULL);
 
@@ -663,6 +700,18 @@ int main(int argc, char **argv)
 		else
 			break;
 	}
+
+
+	if ((rc = MQTTClient_create(&mqtt_client, rp->mqtt_uri, rp->mqtt_client_id,
+        MQTTCLIENT_PERSISTENCE_NONE, NULL)) != MQTTCLIENT_SUCCESS)
+    {
+         fprintf(stderr, "Failed to create MQTT client, return code %d\n", rc);
+         exit(1);
+    }
+
+	
+
+
 
 	/*
   	MQTTAsync_create(&client, "tcp://192.168.1.12:1883", "CLIENTID", MQTTCLIENT_PERSISTENCE_NONE, NULL);
@@ -773,12 +822,14 @@ int main(int argc, char **argv)
 		pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
 		r = pthread_create(&tcp_worker_thread, &attr, tcp_worker, NULL);
 		r = pthread_create(&command_thread, &attr, command_worker, NULL);
+		r = pthread_create(&mqtt_worker_thread, &attr, mqtt_worker,NULL);
 		pthread_attr_destroy(&attr);
 
 		r = rtlsdr_read_async(dev, rtlsdr_callback, NULL, buf_num, 0);
 
 		pthread_join(tcp_worker_thread, &status);
 		pthread_join(command_thread, &status);
+		pthread_join(mqtt_worker_thread, &status);
 
 		closesocket(s);
 
@@ -798,14 +849,8 @@ int main(int argc, char **argv)
 	} //end while(1) Listen for TCP Connection
 
 out:
-/*
-    if ((rc = MQTTClient_disconnect(mqtt_client, 10000)) != MQTTCLIENT_SUCCESS)
-    	printf("Failed to MQTT disconnect, return code %d\n", rc);
-		
     MQTTClient_destroy(&mqtt_client);
-*/
 
- 	//MQTTAsync_destroy(&client);
 	rtlsdr_close(dev);
 	closesocket(listensocket);
 	closesocket(s);

@@ -112,7 +112,7 @@ target_link_libraries(rtl_tcp rtlsdr convenience_static
     ${LIBUSB_LIBRARIES}
     ${CMAKE_THREAD_LIBS_INIT}
 )
-target_link_libraries(rtl_tcp_mqtt rtlsdr convenience_static mqtt_util_static paho-mqtt3a
+target_link_libraries(rtl_tcp_mqtt rtlsdr convenience_static mqtt_util_static paho-mqtt3c
     ${LIBUSB_LIBRARIES}
     ${CMAKE_THREAD_LIBS_INIT}
 )
