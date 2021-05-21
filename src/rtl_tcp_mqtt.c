@@ -103,7 +103,8 @@ typedef struct {
 	int agc_mode;
 	int direct_sampling;
 	int offset_tuning;
-	int xtal_freq;
+	int rtl_xtal_freq;
+	int tuner_xtal_freq;
 	int gain_by_index;
 	int enable_biastee;
 	int ppm_error;
@@ -353,24 +354,29 @@ static void *command_worker(void *arg)
 		}
 		switch(cmd.cmd) {
 		case 0x01:
-			printf("set freq %d\n", ntohl(cmd.param));
-			rtlsdr_set_center_freq(dev,ntohl(cmd.param));
+			rp->frequency = ntohl(cmd.param);
+			printf("set freq %d\n", rp->frequency);
+			rtlsdr_set_center_freq(dev,rp->frequency);
 			break;
 		case 0x02:
-			printf("set sample rate %d\n", ntohl(cmd.param));
-			rtlsdr_set_sample_rate(dev, ntohl(cmd.param));
+			rp->samp_rate = ntohl(cmd.param);
+			printf("set sample rate %d\n", rp->samp_rate);
+			rtlsdr_set_sample_rate(dev, rp->samp_rate);
 			break;
 		case 0x03:
-			printf("set gain mode %d\n", ntohl(cmd.param));
-			rtlsdr_set_tuner_gain_mode(dev, ntohl(cmd.param));
+			rp->tuner_gain_mode = ntohl(cmd.param);
+			printf("set gain mode %d\n", rp->tuner_gain_mode);
+			rtlsdr_set_tuner_gain_mode(dev, rp->tuner_gain_mode);
 			break;
 		case 0x04:
-			printf("set gain %d\n", ntohl(cmd.param));
-			rtlsdr_set_tuner_gain(dev, ntohl(cmd.param));
+			rp->tuner_gain = ntohl(cmd.param);
+			printf("set gain %d\n", rp->tuner_gain);
+			rtlsdr_set_tuner_gain(dev, rp->tuner_gain);
 			break;
 		case 0x05:
-			printf("set freq correction %d\n", ntohl(cmd.param));
-			rtlsdr_set_freq_correction(dev, ntohl(cmd.param));
+			rp->ppm_error = ntohl(cmd.param);
+			printf("set freq correction %d\n", rp->ppm_error);
+			rtlsdr_set_freq_correction(dev, rp->ppm_error);
 			break;
 		case 0x06:
 			tmp = ntohl(cmd.param);
@@ -382,32 +388,38 @@ static void *command_worker(void *arg)
 			rtlsdr_set_testmode(dev, ntohl(cmd.param));
 			break;
 		case 0x08:
-			printf("set agc mode %d\n", ntohl(cmd.param));
-			rtlsdr_set_agc_mode(dev, ntohl(cmd.param));
+			rp->agc_mode = ntohl(cmd.param);
+			printf("set agc mode %d\n", rp->agc_mode);
+			rtlsdr_set_agc_mode(dev, rp->agc_mode);
 			break;
 		case 0x09:
-			printf("set direct sampling %d\n", ntohl(cmd.param));
-			rtlsdr_set_direct_sampling(dev, ntohl(cmd.param));
+			rp->direct_sampling = ntohl(cmd.param);
+			printf("set direct sampling %d\n", rp->direct_sampling);
+			rtlsdr_set_direct_sampling(dev, rp->direct_sampling);
 			break;
 		case 0x0a:
-			printf("set offset tuning %d\n", ntohl(cmd.param));
-			rtlsdr_set_offset_tuning(dev, ntohl(cmd.param));
+			rp->offset_tuning = ntohl(cmd.param);
+			printf("set offset tuning %d\n", rp->offset_tuning);
+			rtlsdr_set_offset_tuning(dev, rp->offset_tuning);
 			break;
 		case 0x0b:
-			printf("set rtl xtal %d\n", ntohl(cmd.param));
-			rtlsdr_set_xtal_freq(dev, ntohl(cmd.param), 0);
+			rp->rtl_xtal_freq = ntohl(cmd.param);
+			printf("set rtl xtal %d\n", rp->rtl_xtal_freq);
+			rtlsdr_set_xtal_freq(dev, rp->rtl_xtal_freq, 0);
 			break;
 		case 0x0c:
-			printf("set tuner xtal %d\n", ntohl(cmd.param));
-			rtlsdr_set_xtal_freq(dev, 0, ntohl(cmd.param));
+			rp->tuner_xtal_freq = ntohl(cmd.param);
+			printf("set tuner xtal %d\n", rp->tuner_xtal_freq);
+			rtlsdr_set_xtal_freq(dev, 0, rp->tuner_xtal_freq);
 			break;
 		case 0x0d:
 			printf("set tuner gain by index %d\n", ntohl(cmd.param));
 			set_gain_by_index(dev, ntohl(cmd.param));
 			break;
 		case 0x0e:
-			printf("set bias tee %d\n", ntohl(cmd.param));
-			rtlsdr_set_bias_tee(dev, (int)ntohl(cmd.param));
+			rp->enable_biastee = ntohl(cmd.param);
+			printf("set bias tee %d\n", rp->enable_biastee);
+			rtlsdr_set_bias_tee(dev, (int)rp->enable_biastee);
 			break;
 		default:
 			break;
@@ -475,12 +487,13 @@ int main(int argc, char **argv)
 	rp->ppm_error = 0;
 	rp->tuner_gain = 0;
 	rp->tuner_gain_mode = 0;
-	rp->xtal_freq = 0;
-	rp->addr = "127.0.0.1";
+	rp->rtl_xtal_freq = 0;
+	rp->tuner_xtal_freq = 0;
+	rp->addr = "192.168.1.6";
 	rp->port = "1234";
-	rp->mqtt_uri = "tcp://127.0.0.1:1883";
+	rp->mqtt_uri = "tcp://192.168.1.11:1883";
 	rp->mqtt_topic = "home/rtl_tcp/radio1";
-	rp->mqtt_client_id = "Client1234";
+	rp->mqtt_client_id = "Client_1234";
 	rp->mqtt_qos = 1;
 
 	while ((opt = getopt(argc, argv, "a:p:f:g:s:b:n:d:P:T:h:t:c")) != -1) {
