@@ -441,6 +441,7 @@ static int publishTelemetryMessage(radio_params_t *rp)
 	pubmsg.retained = 0;				
 	
 	rc = MQTTClient_publishMessage(mqtt_client, rp->mqtt_tele_topic, &pubmsg, &token);
+	//printf("Telemetry\n");
 	free(payload);
 	return (rc);
 }
@@ -529,7 +530,7 @@ static void *mqtt_worker(void *arg)
 	rp->op_state = IDLE;
 	publishTelemetryMessage(rp);
 	pthread_mutex_unlock(&pub_cond_lock);
-
+	
 	while(1) {
 		if(do_mqtt_exit) {
 			publishLastWillTestamentMessage(lwt_topic, "Offline");
@@ -552,8 +553,8 @@ static void *mqtt_worker(void *arg)
 			publishTelemetryMessage(rp);
 
 		} else if (r == 0) { //SUCCESS
-			dequeue(my_queue, &q_cmd, &q_param);
-			printf("STAT - %d %u \n", q_cmd, q_param);
+			while (dequeue(my_queue, &q_cmd, &q_param))
+				printf("STAT - %d %u \n", q_cmd, q_param);
 
 			//print_list(rp->fifo_cmds);
 			/*
@@ -716,64 +717,90 @@ static void *command_worker(void *arg)
 			rp->samp_rate = ntohl(cmd.param);
 			printf("set sample rate %d\n", rp->samp_rate);
 			rtlsdr_set_sample_rate(dev, rp->samp_rate);
+			enqueue(my_queue, 2, ntohl(cmd.param));
+			pthread_cond_signal(&pub_cond);
 			break;
 		case 0x03:
 			rp->tuner_gain_mode = ntohl(cmd.param);
 			printf("set gain mode %d\n", rp->tuner_gain_mode);
 			rtlsdr_set_tuner_gain_mode(dev, rp->tuner_gain_mode);
+			enqueue(my_queue, 3, ntohl(cmd.param));
+			pthread_cond_signal(&pub_cond);
 			break;
 		case 0x04:
 			rp->tuner_gain = ntohl(cmd.param);
 			printf("set gain %d\n", rp->tuner_gain);
 			rtlsdr_set_tuner_gain(dev, rp->tuner_gain);
+			enqueue(my_queue, 4, ntohl(cmd.param));
+			pthread_cond_signal(&pub_cond);
 			break;
 		case 0x05:
 			rp->ppm_error = ntohl(cmd.param);
 			printf("set freq correction %d\n", rp->ppm_error);
 			rtlsdr_set_freq_correction(dev, rp->ppm_error);
+			enqueue(my_queue, 5, ntohl(cmd.param));
+			pthread_cond_signal(&pub_cond);
 			break;
 		case 0x06:
 			tmp = ntohl(cmd.param);
 			printf("set if stage %d gain %d\n", tmp >> 16, (short)(tmp & 0xffff));
 			rtlsdr_set_tuner_if_gain(dev, tmp >> 16, (short)(tmp & 0xffff));
+			enqueue(my_queue, 6, ntohl(cmd.param));
+			pthread_cond_signal(&pub_cond);
 			break;
 		case 0x07:
 			printf("set test mode %d\n", ntohl(cmd.param));
 			rtlsdr_set_testmode(dev, ntohl(cmd.param));
+			enqueue(my_queue, 7, ntohl(cmd.param));
+			pthread_cond_signal(&pub_cond);
 			break;
 		case 0x08:
 			rp->agc_mode = ntohl(cmd.param);
 			printf("set agc mode %d\n", rp->agc_mode);
 			rtlsdr_set_agc_mode(dev, rp->agc_mode);
+			enqueue(my_queue, 8, ntohl(cmd.param));
+			pthread_cond_signal(&pub_cond);			
 			break;
 		case 0x09:
 			rp->direct_sampling = ntohl(cmd.param);
 			printf("set direct sampling %d\n", rp->direct_sampling);
 			rtlsdr_set_direct_sampling(dev, rp->direct_sampling);
+			enqueue(my_queue, 9, ntohl(cmd.param));
+			pthread_cond_signal(&pub_cond);				
 			break;
 		case 0x0a:
 			rp->offset_tuning = ntohl(cmd.param);
 			printf("set offset tuning %d\n", rp->offset_tuning);
 			rtlsdr_set_offset_tuning(dev, rp->offset_tuning);
+			enqueue(my_queue, 10, ntohl(cmd.param));
+			pthread_cond_signal(&pub_cond);	
 			break;
 		case 0x0b:
 			rp->rtl_xtal_freq = ntohl(cmd.param);
 			printf("set rtl xtal %d\n", rp->rtl_xtal_freq);
 			rtlsdr_set_xtal_freq(dev, rp->rtl_xtal_freq, 0);
+			enqueue(my_queue, 11, ntohl(cmd.param));
+			pthread_cond_signal(&pub_cond);	
 			break;
 		case 0x0c:
 			rp->tuner_xtal_freq = ntohl(cmd.param);
 			printf("set tuner xtal %d\n", rp->tuner_xtal_freq);
 			rtlsdr_set_xtal_freq(dev, 0, rp->tuner_xtal_freq);
+			enqueue(my_queue, 12, ntohl(cmd.param));
+			pthread_cond_signal(&pub_cond);	
 			break;
 		case 0x0d:
 			printf("set tuner gain by index %d\n", ntohl(cmd.param));
 			set_gain_by_index(dev, ntohl(cmd.param));
+			enqueue(my_queue, 13, ntohl(cmd.param));
+			pthread_cond_signal(&pub_cond);				
 			break;
 		case 0x0e:
 			rp->enable_biastee = ntohl(cmd.param);
 			printf("set bias tee %d\n", rp->enable_biastee);
 			rtlsdr_set_bias_tee(dev, (int)rp->enable_biastee);
+			enqueue(my_queue, 14, ntohl(cmd.param));
+			pthread_cond_signal(&pub_cond);	
 			break;
 		default:
 			break;
@@ -1047,7 +1074,6 @@ int main(int argc, char **argv)
 	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
 	r = pthread_create(&mqtt_worker_thread, &attr, mqtt_worker,NULL);
 	pthread_attr_destroy(&attr);
-
 
 #ifdef _WIN32
 	ioctlsocket(listensocket, FIONBIO, &blockmode);
