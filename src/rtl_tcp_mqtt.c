@@ -44,7 +44,6 @@
 #include <MQTTClient.h>
 #include "rtl-sdr.h"
 #include "convenience/convenience.h"
-#include "mqtt_util/mqtt_util.h"
 
 #ifdef _WIN32
 #pragma comment(lib, "ws2_32.lib")
