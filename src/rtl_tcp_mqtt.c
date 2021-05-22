@@ -94,6 +94,7 @@ static struct llist *ll_buffers = 0;
 static int llbuf_num = 500;
 
 static volatile int do_exit = 0;
+static volatile int do_mqtt_exit = 0;
 
 typedef enum  {
 	UNKNOW,
@@ -103,6 +104,9 @@ typedef enum  {
 typedef struct {
 	int dev_index;
 	char *dev_name;
+	char *dev_product;
+	char *dev_vendor;
+	char *dev_serial; 
 	uint32_t frequency;
 	uint32_t samp_rate;
 	int tuner_gain_mode;
@@ -121,14 +125,21 @@ typedef struct {
 	char* port;
 	char* mqtt_uri;
 	char* mqtt_topic;
+	char* mqtt_tele_topic;
+	char* mqtt_stat_topic;
+	char* mqtt_lwt_topic;
 	char* mqtt_client_id;
+	int mqtt_tele_period;
 	int mqtt_qos;
+	unsigned char last_cmd;
+	int last_param;
 } radio_params_t;
 
 static radio_params_t *rp = NULL;
 
 static MQTTClient mqtt_client;
-static MQTTClient_connectOptions mqtt_conn_opts = MQTTClient_connectOptions_initializer;
+
+
 
 void usage(void)
 {
@@ -145,9 +156,47 @@ void usage(void)
 		"\t[-T enable bias-T on GPIO PIN 0 (works for rtl-sdr.com v3 dongles)]\n"
 		"\t[-h Mqtt URI address]\n"
 		"\t[-t Mqtt topic]\n"
-		"\t[-c Mqtt client ID]\n");
+		"\t[-c Mqtt client ID]\n"
+		"\t[-y Mqtt Telemetry period\n");
 	exit(1);
 }
+
+
+void createTelemetryPayload(radio_params_t* rp, char **payload)
+{
+
+	char op[255];
+	switch(rp->op_state)
+	{
+		case UNKNOW:
+			strcpy(op,"UNKNOW");
+			break;
+		case IDLE:
+			strcpy(op, "WAITING");
+			break;
+		case RUNNING:
+			strcpy(op, "RUNNING");
+			break;
+		default:
+			strcpy(op, "");
+	};
+
+
+	*payload =  malloc(sizeof(char) * 2048);
+	sprintf (*payload, 
+  	        "{ \"dev_id\" : %d,\"dev_name\" : \"%s\",\"dev_serial\" : \"%s\", \"client_ip\" : \"%s\", \"op_mode\" : \"%s\", \"frequency\" : %u, \"agc_mode\" : %d, \"gain\" : %d, \"sample rate\" : %u, \"ppm error\" : %d }", 
+			   rp->dev_index,
+			   rp->dev_name,
+			   rp->dev_serial,
+			   rp->client_ip,
+			   op,
+			   rp->frequency,
+			   rp->tuner_gain_mode,
+			   rp->tuner_gain, 
+			   rp->samp_rate,
+			   rp->ppm_error);
+}
+
 
 #ifdef _WIN32
 int gettimeofday(struct timeval *tv, void* ignored)
@@ -245,22 +294,108 @@ static void *mqtt_worker(void *arg)
 	struct timespec ts;
 	struct timeval tp;
 	int r = 0;
+	char *payload="";
+	int rc;
+
+	char* lwt_topic;
+	char* stat_topic;
+	int tele_period;
+
+	char *stat_topics[] = {"/FREQ","/SAMP_RATE",
+						   "/GAIN_MODE","/GAIN",
+						   "/PPM_ERR","/IF_GAIN",
+						   "/TEST_MODE","/AGC_MODE",
+						   "/DIRECT_SAMP","/OFFSET_TUNE",
+						   "/RTL_XTAL","/TUNER_XTAL",
+						   "/GAIN_BY_IDX","/ENABLE_TEE"};
+
+	MQTTClient_willOptions mqtt_lwt_opts = MQTTClient_willOptions_initializer;	 
+	MQTTClient_connectOptions mqtt_conn_opts = { {'M', 'Q', 'T', 'C'}, 8, 60, 1, 1, NULL, NULL, NULL, 30, 0, NULL,\
+												   0, NULL, MQTTVERSION_DEFAULT, {NULL, 0, 0}, {0, NULL}, -1, 0, NULL, NULL, NULL };
+	MQTTClient_message pubmsg = MQTTClient_message_initializer;
+	MQTTClient_deliveryToken token;
 	
+	pthread_mutex_lock(&pub_cond_lock);
+	lwt_topic = strdup(rp->mqtt_lwt_topic);
+	tele_period = rp->mqtt_tele_period;
+	pthread_mutex_unlock(&pub_cond_lock);
+
+	mqtt_lwt_opts.topicName = lwt_topic;
+	mqtt_lwt_opts.message = "Offline";
+	mqtt_lwt_opts.retained = 1;
+	mqtt_lwt_opts.qos = 1;
+	mqtt_conn_opts.httpsProxy = NULL;
+	mqtt_conn_opts.keepAliveInterval = tele_period+5;
+	mqtt_conn_opts.will = &mqtt_lwt_opts;
+    mqtt_conn_opts.cleansession = 1;
+	
+    if ((rc = MQTTClient_connect(mqtt_client, &mqtt_conn_opts)) != MQTTCLIENT_SUCCESS)
+    {
+        fprintf(stderr, "Failed to connect at MQTT broker, return code %d\n", rc);
+		sighandler(0);
+		pthread_exit(NULL);
+    }
+
+    pubmsg.payload = "Online";
+    pubmsg.payloadlen = strlen("Online");
+    pubmsg.qos = 1;
+    pubmsg.retained = 1;
+    MQTTClient_publishMessage(mqtt_client, lwt_topic, &pubmsg, &token);
+    /*
+	printf("Waiting for up to %d seconds for LWT publication\n"
+            "on topic %s for client with ClientID: %s\n",
+            (int)(10000/1000), rp->mqtt_lwt_topic, rp->mqtt_client_id);
+    */
+	rc = MQTTClient_waitForCompletion(mqtt_client, token, 10000);
+
 	while(1) {
-		if(do_exit) {
-			printf("MQTT PUBS THREAD EXIT\n");
+		if(do_mqtt_exit) {
+			pubmsg.payload = "Offline";
+			pubmsg.payloadlen = strlen("Offline");
+			pubmsg.qos = 1;
+			pubmsg.retained = 1;
+			MQTTClient_publishMessage(mqtt_client, lwt_topic, &pubmsg, &token);
+			/*
+			printf("Waiting for up to %d seconds for LWT publication\n"
+					"on topic %s for client with ClientID: %s\n",
+					(int)(10000/1000), rp->mqtt_lwt_topic, rp->mqtt_client_id);
+			*/
+			rc = MQTTClient_waitForCompletion(mqtt_client, token, 10000);
+
+			MQTTClient_disconnect(mqtt_client, 10000);
+			printf("MQTT Worker exit\n");
 			pthread_exit(0);
 		}
 		
+		/*
+			Attende il signal dal Command Worker nel caso ci siano comandi da notificare sul topic Stat
+			Il timeout impostato equivale al tele_period in modo da effettuare la pubblicazione del topic tele a cadenza regolare
+		*/
 		pthread_mutex_lock(&pub_cond_lock);
 		gettimeofday(&tp, NULL);
-		ts.tv_sec  = tp.tv_sec+5;
+		ts.tv_sec  = tp.tv_sec + tele_period;
 		ts.tv_nsec = tp.tv_usec * 1000;
 		r = pthread_cond_timedwait(&pub_cond, &pub_cond_lock, &ts);
 		if(r == ETIMEDOUT) {
-			printf("TELEMETRY\n");
+			createTelemetryPayload(rp, &payload);
+			pubmsg.payload = payload;
+			pubmsg.payloadlen = strlen(payload);
+			pubmsg.qos = 0;
+			pubmsg.retained = 0;
+			MQTTClient_publishMessage(mqtt_client, rp->mqtt_tele_topic, &pubmsg, &token);
+			free(payload);
 		} else if (r == 0) { //SUCCESS
-			printf("STAT\n");
+			stat_topic = strdup(rp->mqtt_stat_topic);
+			strcat(stat_topic, stat_topics[rp->last_cmd]);
+			payload = malloc(sizeof(char)*255);
+			sprintf(payload, "%u", rp->last_param);
+			pubmsg.payload = payload;
+			pubmsg.payloadlen = strlen(payload);
+			pubmsg.qos = 0;
+			pubmsg.retained = 0;
+			MQTTClient_publishMessage(mqtt_client, stat_topic, &pubmsg, &token);
+			//printf("STAT: %s - %s\n", stat_topic, payload);
+			free(payload);
 		}
 		pthread_mutex_unlock(&pub_cond_lock);
 	}
@@ -287,7 +422,7 @@ static void *tcp_worker(void *arg)
 		r = pthread_cond_timedwait(&cond, &ll_mutex, &ts);
 		if(r == ETIMEDOUT) {
 			pthread_mutex_unlock(&ll_mutex);
-			printf("worker cond timeout\n");
+			printf("tcp worker cond timeout\n");
 			sighandler(0);
 			pthread_exit(NULL);
 		}
@@ -312,7 +447,7 @@ static void *tcp_worker(void *arg)
 					index += bytessent;
 				}
 				if(bytessent == SOCKET_ERROR || do_exit) {
-						printf("worker socket bye\n");
+						printf("tcp worker socket bye\n");
 						sighandler(0);
 						pthread_exit(NULL);
 				}
@@ -382,35 +517,42 @@ static void *command_worker(void *arg)
 			}
 		}
 
-		
+		pthread_mutex_lock(&pub_cond_lock);
+		if (cmd.cmd > 0 && cmd.cmd < 0x0f)
+		{
+			rp->last_cmd = cmd.cmd - 1;
+			rp->last_param = ntohl(cmd.param);
+		}
 		switch(cmd.cmd) {
 		case 0x01:
-			pthread_mutex_lock(&pub_cond_lock);
 			rp->frequency = ntohl(cmd.param);
 			printf("set freq %d\n", rp->frequency);
 			rtlsdr_set_center_freq(dev,rp->frequency);
 			pthread_cond_signal(&pub_cond);
-			pthread_mutex_unlock(&pub_cond_lock);
 			break;
 		case 0x02:
 			rp->samp_rate = ntohl(cmd.param);
 			printf("set sample rate %d\n", rp->samp_rate);
 			rtlsdr_set_sample_rate(dev, rp->samp_rate);
+			pthread_cond_signal(&pub_cond);
 			break;
 		case 0x03:
 			rp->tuner_gain_mode = ntohl(cmd.param);
 			printf("set gain mode %d\n", rp->tuner_gain_mode);
 			rtlsdr_set_tuner_gain_mode(dev, rp->tuner_gain_mode);
+			pthread_cond_signal(&pub_cond);
 			break;
 		case 0x04:
 			rp->tuner_gain = ntohl(cmd.param);
 			printf("set gain %d\n", rp->tuner_gain);
 			rtlsdr_set_tuner_gain(dev, rp->tuner_gain);
+			pthread_cond_signal(&pub_cond);
 			break;
 		case 0x05:
 			rp->ppm_error = ntohl(cmd.param);
 			printf("set freq correction %d\n", rp->ppm_error);
 			rtlsdr_set_freq_correction(dev, rp->ppm_error);
+			pthread_cond_signal(&pub_cond);
 			break;
 		case 0x06:
 			tmp = ntohl(cmd.param);
@@ -425,26 +567,31 @@ static void *command_worker(void *arg)
 			rp->agc_mode = ntohl(cmd.param);
 			printf("set agc mode %d\n", rp->agc_mode);
 			rtlsdr_set_agc_mode(dev, rp->agc_mode);
+			pthread_cond_signal(&pub_cond);
 			break;
 		case 0x09:
 			rp->direct_sampling = ntohl(cmd.param);
 			printf("set direct sampling %d\n", rp->direct_sampling);
 			rtlsdr_set_direct_sampling(dev, rp->direct_sampling);
+			pthread_cond_signal(&pub_cond);
 			break;
 		case 0x0a:
 			rp->offset_tuning = ntohl(cmd.param);
 			printf("set offset tuning %d\n", rp->offset_tuning);
 			rtlsdr_set_offset_tuning(dev, rp->offset_tuning);
+			pthread_cond_signal(&pub_cond);
 			break;
 		case 0x0b:
 			rp->rtl_xtal_freq = ntohl(cmd.param);
 			printf("set rtl xtal %d\n", rp->rtl_xtal_freq);
 			rtlsdr_set_xtal_freq(dev, rp->rtl_xtal_freq, 0);
+			pthread_cond_signal(&pub_cond);
 			break;
 		case 0x0c:
 			rp->tuner_xtal_freq = ntohl(cmd.param);
 			printf("set tuner xtal %d\n", rp->tuner_xtal_freq);
 			rtlsdr_set_xtal_freq(dev, 0, rp->tuner_xtal_freq);
+			pthread_cond_signal(&pub_cond);
 			break;
 		case 0x0d:
 			printf("set tuner gain by index %d\n", ntohl(cmd.param));
@@ -454,20 +601,19 @@ static void *command_worker(void *arg)
 			rp->enable_biastee = ntohl(cmd.param);
 			printf("set bias tee %d\n", rp->enable_biastee);
 			rtlsdr_set_bias_tee(dev, (int)rp->enable_biastee);
+			pthread_cond_signal(&pub_cond);
 			break;
 		default:
 			break;
 		}
 		cmd.cmd = 0xff;
+		pthread_mutex_unlock(&pub_cond_lock);
 	}
 }
 
 int main(int argc, char **argv)
 {
 	int r, opt, i;
-	//char *addr = "127.0.0.1";
-	//char *port = "1234";
-	//uint32_t frequency = 100000000, samp_rate = 2048000;
 	struct sockaddr_storage local, remote;
 	struct addrinfo *ai;
 	struct addrinfo *aiHead;
@@ -478,10 +624,7 @@ int main(int argc, char **argv)
 	char remportinfo[NI_MAXSERV];
 	int aiErr;
 	uint32_t buf_num = 0;
-	//int dev_index = 0;
 	int dev_given = 0;
-	//int gain = 0;
-	//int ppm_error = 0;
 	struct llist *curelem,*prev;
 	pthread_attr_t attr;
 	void *status;
@@ -492,10 +635,6 @@ int main(int argc, char **argv)
 	fd_set readfds;
 	u_long blockmode = 1;
 	dongle_info_t dongle_info;
-
-//	MQTTClient_message pubmsg = MQTTClient_message_initializer;
-//	MQTTClient_deliveryToken token;
-	
 	int rc;
 
 #ifdef _WIN32
@@ -527,26 +666,28 @@ int main(int argc, char **argv)
 	rp->port = "1234";
 	rp->mqtt_uri = "tcp://192.168.1.11:1883";
 	rp->mqtt_topic = "home/rtl_tcp/radio1";
+	rp->mqtt_tele_topic="home/rtl_tcp/radio1/tele/STATE";
+	rp->mqtt_stat_topic="home/rtl_tcp/radio1/stat";
+	rp->mqtt_lwt_topic="home/rtl_tcp/radio1/tele/LWT";
 	rp->mqtt_client_id = "Client_1234";
 	rp->mqtt_qos = 1;
+	rp->mqtt_tele_period = 10;
+	rp->last_cmd = 0xff;
+	rp->last_param = -1;
 
-	while ((opt = getopt(argc, argv, "a:p:f:g:s:b:n:d:P:T:h:t:c")) != -1) {
+	while ((opt = getopt(argc, argv, "a:p:f:g:s:b:n:d:P:T:h:t:c:y")) != -1) {
 		switch (opt) {
 		case 'd':
-			//dev_index = verbose_device_search(optarg);
 			rp->dev_index = verbose_device_search(optarg);
 			dev_given = 1;
 			break;
 		case 'f':
-			//frequency = (uint32_t)atofs(optarg);
 			rp->frequency = (uint32_t)atofs(optarg);
 			break;
 		case 'g':
-			//gain = (int)(atof(optarg) * 10); /* tenths of a dB */
 			rp->tuner_gain = (int)(atof(optarg) * 10); /* tenths of a dB */
 			break;
 		case 's':
-			//samp_rate = (uint32_t)atofs(optarg);
 			rp->samp_rate  = (uint32_t)atofs(optarg);
 			break;
 		case 'a':
@@ -572,10 +713,19 @@ int main(int argc, char **argv)
 			break;
 		case 't':
 			rp->mqtt_topic = strdup(optarg);
+			rp->mqtt_tele_topic = strdup(optarg);
+			rp->mqtt_stat_topic = strdup(optarg);
+			rp->mqtt_lwt_topic = strdup(optarg);
+			strcat(rp->mqtt_tele_topic, "/tele/STATE");
+			strcat(rp->mqtt_lwt_topic, "/tele/LWT");
+			strcat(rp->mqtt_stat_topic, "/stat");
 			break;
 		case 'c':
 			rp->mqtt_client_id = strdup(optarg);
-			break;						
+			break;
+		case 'y':
+			rp->mqtt_tele_period = atoi(optarg);
+			break;				
 		default:
 			usage();
 			break;
@@ -701,7 +851,15 @@ int main(int argc, char **argv)
 			break;
 	}
 
+	// populate device info 
+	rp->dev_vendor = malloc(sizeof(char) * 256);
+	rp->dev_product = malloc(sizeof(char) * 256);
+	rp->dev_serial= malloc(sizeof(char) * 256);
+	rtlsdr_get_device_usb_strings(rp->dev_index, rp->dev_vendor, rp->dev_product, rp->dev_serial);
+	rp->dev_name= malloc(sizeof(char) * 256);
+	strcpy(rp->dev_name, rtlsdr_get_device_name((uint32_t)rp->dev_index));
 
+	
 	if ((rc = MQTTClient_create(&mqtt_client, rp->mqtt_uri, rp->mqtt_client_id,
         MQTTCLIENT_PERSISTENCE_NONE, NULL)) != MQTTCLIENT_SUCCESS)
     {
@@ -709,61 +867,12 @@ int main(int argc, char **argv)
          exit(1);
     }
 
-	
+	//start MQTT Worker thread	
+	pthread_attr_init(&attr);
+	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+	r = pthread_create(&mqtt_worker_thread, &attr, mqtt_worker,NULL);
+	pthread_attr_destroy(&attr);
 
-
-
-	/*
-  	MQTTAsync_create(&client, "tcp://192.168.1.12:1883", "CLIENTID", MQTTCLIENT_PERSISTENCE_NONE, NULL);
-    MQTTAsync_setCallbacks(client, NULL, onConnectionLost, NULL, NULL);
-    conn_opts.keepAliveInterval = 20;
-    conn_opts.cleansession = 1;
-    conn_opts.onSuccess = onConnect;
-    conn_opts.onFailure = onConnectFailure;
-    conn_opts.context = client;
-    if ((rc = MQTTAsync_connect(client, &conn_opts)) != MQTTASYNC_SUCCESS)
-    {
-		fprintf(stderr, "Failed to start MQTT connection, return code %d\n", rc);
-        exit(1);
-    }
-
-*/
-
-/*
-	if ((rc = MQTTClient_create(&mqtt_client, mqtt_addr, mqtt_client_id,
-        MQTTCLIENT_PERSISTENCE_NONE, NULL)) != MQTTCLIENT_SUCCESS)
-    {
-         fprintf(stderr, "Failed to create MQTT client, return code %d\n", rc);
-         return(-1);
-    }
-
-	conn_opts.keepAliveInterval = 20;
-    conn_opts.cleansession = 1;
-	
-    if ((rc = MQTTClient_connect(mqtt_client, &conn_opts)) != MQTTCLIENT_SUCCESS)
-    {
-        fprintf(stderr, "Connection to MQTT broker failed, return code %d\n", rc);
-        return(-1);
-    }
-
-	char buff[255];
-
-	sprintf (buff, 
-  	        "{ \"device_id\" : %d , \
-			   \"frequency\" : %d , \
-			   \"gain\" : %d , \
-			   \"sample rate\" : %d , \
-			   \"ppm error\" : %d }", 
-			   dev_index, frequency, gain, samp_rate, ppm_error);
-
-	pubmsg.payload = buff;
-	pubmsg.payloadlen = (int)strlen(buff);
-	pubmsg.qos = 1;
-	pubmsg.retained = 0;
-
-    if ((rc = MQTTClient_publishMessage(mqtt_client, mqtt_topic, &pubmsg, &token)) != MQTTCLIENT_SUCCESS)
-         printf("Failed to publish MQTT message, return code %d\n", rc);
-*/
 
 #ifdef _WIN32
 	ioctlsocket(listensocket, FIONBIO, &blockmode);
@@ -773,6 +882,7 @@ int main(int argc, char **argv)
 #endif
 
 	while(1) {
+		rp->op_state = IDLE;
 		printf("listening...\n");
 		printf("Use the device argument 'rtl_tcp=%s:%s' in OsmoSDR "
 		       "(gr-osmosdr) source\n"
@@ -803,6 +913,8 @@ int main(int argc, char **argv)
 			    remportinfo, NI_MAXSERV, NI_NUMERICSERV);
 		printf("client accepted! %s %s\n", remhostinfo, remportinfo);
 
+		rp->client_ip = remhostinfo;
+
 		memset(&dongle_info, 0, sizeof(dongle_info));
 		memcpy(&dongle_info.magic, "RTL0", 4);
 
@@ -822,18 +934,17 @@ int main(int argc, char **argv)
 		pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
 		r = pthread_create(&tcp_worker_thread, &attr, tcp_worker, NULL);
 		r = pthread_create(&command_thread, &attr, command_worker, NULL);
-		r = pthread_create(&mqtt_worker_thread, &attr, mqtt_worker,NULL);
 		pthread_attr_destroy(&attr);
 
 		r = rtlsdr_read_async(dev, rtlsdr_callback, NULL, buf_num, 0);
-
+		
+		rp->op_state = RUNNING;
 		pthread_join(tcp_worker_thread, &status);
 		pthread_join(command_thread, &status);
-		pthread_join(mqtt_worker_thread, &status);
-
+		rp->op_state = IDLE;
 		closesocket(s);
 
-		printf("all threads dead..\n");
+		printf("TCP and Command threads dead..\n");
 		curelem = ll_buffers;
 		ll_buffers = 0;
 
@@ -847,8 +958,11 @@ int main(int argc, char **argv)
 		do_exit = 0;
 		global_numq = 0;
 	} //end while(1) Listen for TCP Connection
-
 out:
+
+	//Wait MQTT Worker thread for exit
+	do_mqtt_exit = 1;
+	pthread_join(mqtt_worker_thread, &status);
     MQTTClient_destroy(&mqtt_client);
 
 	rtlsdr_close(dev);
