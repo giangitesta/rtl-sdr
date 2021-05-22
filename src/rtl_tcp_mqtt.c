@@ -22,6 +22,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <math.h>
 
 #ifndef _WIN32
@@ -101,19 +102,85 @@ typedef enum  {
 	RUNNING,
 } op_states;
 
-/*
-typedef struct node_value 
-{
+
+typedef struct state_msg {
 	unsigned char cmd;
-	unsigned int param;
-} node_value_t;
+	unsigned int param; 
+} state_msg;
 
+// struct node - struttura di un nodo della coda thread-safe
 typedef struct node {
-   node_value_t *value;
-   struct node *next;
-} node_t;
+    //int value;
+	struct state_msg value;
+    struct node *next;
+} node;
+// struct Queue_r - struttura della coda thread-safe (usa una linked list)
+typedef struct {
+    node *front;
+    node *rear;
+    pthread_mutex_t mutex;
+} Queue_r;
 
-*/
+// qcreate() - crea una coda vuota
+Queue_r* qcreate()
+{
+    // crea la coda
+    Queue_r *queue = malloc(sizeof(Queue_r));
+    // inizializza la coda
+    queue->front = NULL;
+    queue->rear  = NULL;
+    pthread_mutex_init(&queue->mutex, NULL);
+    return queue;
+}
+
+// enqueue() - aggiunge un elemento alla coda
+void enqueue(Queue_r* queue, unsigned char cmd, unsigned int param)
+{
+    // crea un nuovo nodo
+    node *temp = malloc(sizeof(struct node));
+    temp->value.cmd = cmd;
+	temp->value.param = param;
+    temp->next  = NULL;
+    // blocco l'accesso
+    pthread_mutex_lock(&queue->mutex);
+    // test se la coda è vuota
+    if (queue->front == NULL) {
+        // con la coda vuota front e rear coincidono
+        queue->front = temp;
+        queue->rear  = temp;
+    }
+    else {
+        // aggiungo un elemento
+        node *old_rear = queue->rear;
+        old_rear->next = temp;
+        queue->rear    = temp;
+    }
+    // sblocco l'accesso ed esco
+    pthread_mutex_unlock(&queue->mutex);
+}
+
+// dequeue() - toglie un elemento dalla coda
+bool dequeue(Queue_r* queue, unsigned char *cmd, unsigned int *param)
+{
+	// blocco l'accesso
+    pthread_mutex_lock(&queue->mutex);
+    // test se la coda è vuota
+    node *front = queue->front;
+    if (front == NULL) {
+        // sblocco l'accesso ed esco
+        pthread_mutex_unlock(&queue->mutex);
+        return false;
+    }
+    // leggo il valore ed elimino l'elemento dalla coda
+    *cmd = front->value.cmd;
+	*param = front->value.param;
+    queue->front = front->next;
+    free(front);
+    // sblocco l'accesso ed esco
+    pthread_mutex_unlock(&queue->mutex);
+    return true;
+}
+
 
 typedef struct {
 	int dev_index;
@@ -152,6 +219,7 @@ static radio_params_t *rp = NULL;
 
 static MQTTClient mqtt_client;
 
+static Queue_r *my_queue = NULL;
 /*
 void enqueue(node_t **head, node_value_t *cmd) {
    node_t *new_node = malloc(sizeof(node_t));
@@ -426,7 +494,8 @@ static void *mqtt_worker(void *arg)
 
 	char* lwt_topic;
 	int tele_period;
-	//node_value_t *nv;
+	unsigned char q_cmd;
+	unsigned int q_param;
 
 
 	MQTTClient_willOptions mqtt_lwt_opts = MQTTClient_willOptions_initializer;	 
@@ -483,8 +552,8 @@ static void *mqtt_worker(void *arg)
 			publishTelemetryMessage(rp);
 
 		} else if (r == 0) { //SUCCESS
-
-			printf("STAT\n");
+			dequeue(my_queue, &q_cmd, &q_param);
+			printf("STAT - %d %u \n", q_cmd, q_param);
 
 			//print_list(rp->fifo_cmds);
 			/*
@@ -640,6 +709,8 @@ static void *command_worker(void *arg)
 			rp->frequency = ntohl(cmd.param);
 			printf("set freq %d\n", rp->frequency);
 			rtlsdr_set_center_freq(dev,rp->frequency);
+			enqueue(my_queue, 1, ntohl(cmd.param));
+			pthread_cond_signal(&pub_cond);
 			break;
 		case 0x02:
 			rp->samp_rate = ntohl(cmd.param);
@@ -969,6 +1040,8 @@ int main(int argc, char **argv)
          exit(1);
     }
 
+	my_queue = qcreate();
+
 	//start MQTT Worker thread	
 	pthread_attr_init(&attr);
 	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
@@ -1102,7 +1175,7 @@ out:
 	do_mqtt_exit = 1;
 	pthread_join(mqtt_worker_thread, &status);
     MQTTClient_destroy(&mqtt_client);
-
+	free(my_queue);
 	rtlsdr_close(dev);
 	closesocket(listensocket);
 	closesocket(s);
