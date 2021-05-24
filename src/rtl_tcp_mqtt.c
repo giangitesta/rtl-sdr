@@ -64,9 +64,10 @@ static pthread_t mqtt_worker_thread;
 static pthread_t tcp_worker_thread;
 static pthread_t command_thread;
 
-static pthread_cond_t pub_cond;
-static pthread_mutex_t pub_cond_lock;
+//static pthread_cond_t pub_cond;
+//static pthread_mutex_t pub_cond_lock;
 
+static pthread_mutex_t param_lock;
 
 static pthread_cond_t exit_cond;
 static pthread_mutex_t exit_cond_lock;
@@ -96,22 +97,16 @@ static int llbuf_num = 500;
 static volatile int do_exit = 0;
 static volatile int do_mqtt_exit = 0;
 
-typedef enum  {
-	UNKNOW,
-	IDLE,
-	RUNNING,
-} op_states;
 
-
-typedef struct state_msg {
+typedef struct command_msg {
 	unsigned char cmd;
 	unsigned int param; 
-} state_msg;
+} command_msg;
 
 // struct node - struttura di un nodo della coda thread-safe
 typedef struct node {
     //int value;
-	struct state_msg value;
+	struct command_msg value;
     struct node *next;
 } node;
 // struct Queue_r - struttura della coda thread-safe (usa una linked list)
@@ -119,6 +114,7 @@ typedef struct {
     node *front;
     node *rear;
     pthread_mutex_t mutex;
+	pthread_cond_t cond;
 } Queue_r;
 
 // qcreate() - crea una coda vuota
@@ -130,6 +126,8 @@ Queue_r* qcreate()
     queue->front = NULL;
     queue->rear  = NULL;
     pthread_mutex_init(&queue->mutex, NULL);
+	pthread_cond_init(&queue->cond, NULL);
+
     return queue;
 }
 
@@ -155,6 +153,10 @@ void enqueue(Queue_r* queue, unsigned char cmd, unsigned int param)
         old_rear->next = temp;
         queue->rear    = temp;
     }
+
+	//signal creation of new node to consumer
+	pthread_cond_signal(&queue->cond);
+
     // sblocco l'accesso ed esco
     pthread_mutex_unlock(&queue->mutex);
 }
@@ -181,13 +183,59 @@ bool dequeue(Queue_r* queue, unsigned char *cmd, unsigned int *param)
     return true;
 }
 
+// dequeue() - toglie un elemento dalla coda con timeout
+int dequeue_with_timeout(Queue_r* queue, int timeout, unsigned char *cmd, unsigned int *param)
+{
+	struct timeval tv= {1,0};
+	struct timespec ts;
+	struct timeval tp;
+	int r = -1;
+
+	int ret = -1;
+
+	gettimeofday(&tp, NULL);
+	ts.tv_sec  = tp.tv_sec + timeout;
+	ts.tv_nsec = tp.tv_usec * 1000;
+
+	pthread_mutex_lock(&queue->mutex);
+	r = pthread_cond_timedwait(&queue->cond, &queue->mutex, &ts);
+	if(r == ETIMEDOUT) { //TIMEOUT
+		*cmd = 0xff;
+		*param = 0;	
+  		ret = 1;	
+	} else if (r == 0) { //SIGNALED 
+		// test se la coda è vuota
+		node *front = queue->front;
+		if (front == NULL) {
+			//coda vuota
+			ret = 2;
+		} else {
+			// coda piena - leggo il valore ed elimino l'elemento dalla coda
+			*cmd = front->value.cmd;
+			*param = front->value.param;
+			queue->front = front->next;
+			free(front);
+			ret=0;
+		}
+	}
+	//sblocco accesso
+	pthread_mutex_unlock(&queue->mutex);
+	return(ret);
+}
+
+
 
 typedef struct {
-	int dev_index;
-	char *dev_name;
-	char *dev_product;
-	char *dev_vendor;
-	char *dev_serial; 
+	int index;
+	char *name;
+	char *product;
+	char *vendor;
+	char *serial; 
+
+} device_info_t;
+
+
+typedef struct {
 	uint32_t frequency;
 	uint32_t samp_rate;
 	int tuner_gain_mode;
@@ -200,70 +248,34 @@ typedef struct {
 	int gain_by_index;
 	int enable_biastee;
 	int ppm_error;
-	char* client_ip;
-	op_states op_state;
+} rtl_params_t;
+
+typedef struct {
+	char* uri;
+	char* base_topic;
+	char* tele_topic;
+	char* stat_topic;
+	char* lwt_topic;
+	char* client_id;
+	int tele_period;
+	int qos;
+} mqtt_params_t;
+
+typedef struct {
 	char* addr;
 	char* port;
-	char* mqtt_uri;
-	char* mqtt_topic;
-	char* mqtt_tele_topic;
-	char* mqtt_stat_topic;
-	char* mqtt_lwt_topic;
-	char* mqtt_client_id;
-	int mqtt_tele_period;
-	int mqtt_qos;
-	//node_t *fifo_cmds;
-} radio_params_t;
+	char* client_ip;
+} server_params_t;
 
-static radio_params_t *rp = NULL;
+static rtl_params_t *rtl_p = NULL;
+static mqtt_params_t *mqtt_p = NULL;
+static server_params_t *server_p = NULL;
+static device_info_t *di_p = NULL;
 
 static MQTTClient mqtt_client;
 
 static Queue_r *my_queue = NULL;
-/*
-void enqueue(node_t **head, node_value_t *cmd) {
-   node_t *new_node = malloc(sizeof(node_t));
-   if (!new_node) return;
-   	
-   new_node->value = cmd;
-   new_node->next = *head;
 
-   *head = new_node;
-}
-
-
-node_value_t* dequeue(node_t **head) {
-   node_t *current, *prev = NULL;
-   node_value_t* retval = NULL;
-
-   if (*head == NULL) return NULL;
-
-   current = *head;
-   while (current->next != NULL) {
-      prev = current;
-      current = current->next;
-   }
-
-   retval = current->value;
-   free(current);
-
-   if (prev)
-      prev->next = NULL;
-   else
-      *head = NULL;
-
-   return retval;
-}
-
-void print_list(node_t *head) {
-    node_t *current = head;
-
-    while (current != NULL) {
-        printf("%d %d\n", current->value->cmd, current->value->param);
-        current = current->next;
-    }
-}
-*/
 
 void usage(void)
 {
@@ -286,40 +298,7 @@ void usage(void)
 }
 
 
-void createTelemetryPayload(radio_params_t* rp, char **payload)
-{
 
-	char op[255];
-	switch(rp->op_state)
-	{
-		case UNKNOW:
-			strcpy(op,"UNKNOW");
-			break;
-		case IDLE:
-			strcpy(op, "WAITING");
-			break;
-		case RUNNING:
-			strcpy(op, "RUNNING");
-			break;
-		default:
-			strcpy(op, "");
-	};
-
-
-	*payload =  malloc(sizeof(char) * 2048);
-	sprintf (*payload, 
-  	        "{ \"dev_id\" : %d,\"dev_name\" : \"%s\",\"dev_serial\" : \"%s\", \"client_ip\" : \"%s\", \"op_mode\" : \"%s\", \"frequency\" : %u, \"agc_mode\" : %d, \"gain\" : %d, \"sample rate\" : %u, \"ppm error\" : %d }", 
-			   rp->dev_index,
-			   rp->dev_name,
-			   rp->dev_serial,
-			   rp->client_ip,
-			   op,
-			   rp->frequency,
-			   rp->tuner_gain_mode,
-			   rp->tuner_gain, 
-			   rp->samp_rate,
-			   rp->ppm_error);
-}
 
 
 #ifdef _WIN32
@@ -426,6 +405,46 @@ static int publishLastWillTestamentMessage(char* lwt_topic, char* payload)
 	return (rc);
 }
 
+
+/*
+void createTelemetryPayload(radio_params_t* rp, char **payload)
+{
+
+	char op[255];
+	switch(rp->op_state)
+	{
+		case UNKNOW:
+			strcpy(op,"UNKNOW");
+			break;
+		case IDLE:
+			strcpy(op, "WAITING");
+			break;
+		case RUNNING:
+			strcpy(op, "RUNNING");
+			break;
+		default:
+			strcpy(op, "");
+	};
+
+
+	*payload =  malloc(sizeof(char) * 2048);
+	sprintf (*payload, 
+  	        "{ \"dev_id\" : %d,\"dev_name\" : \"%s\",\"dev_serial\" : \"%s\", \"client_ip\" : \"%s\", \"op_mode\" : \"%s\", \"frequency\" : %u, \"agc_mode\" : %d, \"gain\" : %d, \"sample rate\" : %u, \"ppm error\" : %d }", 
+			   rp->dev_index,
+			   rp->dev_name,
+			   rp->dev_serial,
+			   rp->client_ip,
+			   op,
+			   rp->frequency,
+			   rp->tuner_gain_mode,
+			   rp->tuner_gain, 
+			   rp->samp_rate,
+			   rp->ppm_error);
+}
+*/
+
+
+/*
 static int publishTelemetryMessage(radio_params_t *rp)
 {
 	MQTTClient_message pubmsg = MQTTClient_message_initializer;
@@ -445,7 +464,7 @@ static int publishTelemetryMessage(radio_params_t *rp)
 	free(payload);
 	return (rc);
 }
-
+*/
 /*
 int publishStatMessage(char *topic, node_value_t *nv)
 {
@@ -486,9 +505,9 @@ static void *mqtt_worker(void *arg)
 
 	u_int32_t appo_freq = 0;
 	
-	struct timeval tv= {1,0};
-	struct timespec ts;
-	struct timeval tp;
+	//struct timeval tv= {1,0};
+	//struct timespec ts;
+	//struct timeval tp;
 	int r = 0;
 	char *payload="";
 	int rc;
@@ -503,10 +522,10 @@ static void *mqtt_worker(void *arg)
 	MQTTClient_connectOptions mqtt_conn_opts = { {'M', 'Q', 'T', 'C'}, 8, 60, 1, 1, NULL, NULL, NULL, 30, 0, NULL,\
 												   0, NULL, MQTTVERSION_DEFAULT, {NULL, 0, 0}, {0, NULL}, -1, 0, NULL, NULL, NULL };
 	
-	pthread_mutex_lock(&pub_cond_lock);
-	lwt_topic = strdup(rp->mqtt_lwt_topic);
-	tele_period = rp->mqtt_tele_period;
-	pthread_mutex_unlock(&pub_cond_lock);
+	pthread_mutex_lock(&param_lock);
+	lwt_topic = strdup(mqtt_p->lwt_topic);
+	tele_period = mqtt_p->tele_period;
+	pthread_mutex_unlock(&param_lock);
 
 	mqtt_lwt_opts.topicName = lwt_topic;
 	mqtt_lwt_opts.message = "Offline";
@@ -526,15 +545,16 @@ static void *mqtt_worker(void *arg)
 
 	publishLastWillTestamentMessage(lwt_topic, "Online");
 
-	pthread_mutex_lock(&pub_cond_lock);
-	rp->op_state = IDLE;
-	publishTelemetryMessage(rp);
-	pthread_mutex_unlock(&pub_cond_lock);
+	//pthread_mutex_lock(&pub_cond_lock);
+	//publishTelemetryMessage(rp);
+	//pthread_mutex_unlock(&pub_cond_lock);
+	printf("INITIAL TELEMETRY\n");
 	
 	while(1) {
 		if(do_mqtt_exit) {
 			publishLastWillTestamentMessage(lwt_topic, "Offline");
 			MQTTClient_disconnect(mqtt_client, 10000);
+			//TO DO: WAIT DISCONNECT ?
 			printf("MQTT Worker exit\n");
 			pthread_exit(0);
 		}
@@ -543,35 +563,21 @@ static void *mqtt_worker(void *arg)
 			Attende il signal dal Command Worker nel caso ci siano comandi da notificare sul topic Stat
 			Il timeout impostato equivale al tele_period in modo da effettuare la pubblicazione del topic tele a cadenza regolare
 		*/
-		gettimeofday(&tp, NULL);
-		ts.tv_sec  = tp.tv_sec + tele_period;
-		ts.tv_nsec = tp.tv_usec * 1000;
 
-		pthread_mutex_lock(&pub_cond_lock);
-		r = pthread_cond_timedwait(&pub_cond, &pub_cond_lock, &ts);
-		if(r == ETIMEDOUT) {
-			publishTelemetryMessage(rp);
+		r = dequeue_with_timeout(my_queue, tele_period, &q_cmd, &q_param);
 
-		} else if (r == 0) { //SUCCESS
-			while (dequeue(my_queue, &q_cmd, &q_param))
-				printf("STAT - %d %u \n", q_cmd, q_param);
-
-			//print_list(rp->fifo_cmds);
-			/*
-			while ((nv = dequeue(&rp->fifo_cmds)) != NULL)
-			{
-				if (nv->cmd == 0xfe) {
-					//force telemetry message update
-					publishTelemetryMessage(rp);
-				} else {
-					//command worker notification
-					publishStatMessage(rp->mqtt_stat_topic, nv);
-				}
-				free(nv);
-			}
-			*/
+		switch (r) {
+			case 0: //send COMMAND UPDATE
+				printf("SEND COMMAND\n");
+				//publishStatMessage(rp->mqtt_stat_topic, nv);
+				break;
+			case 1: //send TELEMETRY
+				printf("SEND TELEMETRY\n");
+				//publishTelemetryMessage(rp);
+				break;
+			default:
+				break;
 		}
-		pthread_mutex_unlock(&pub_cond_lock);
 	}
 }
 
@@ -671,7 +677,6 @@ static void *command_worker(void *arg)
 	struct timeval tv= {1, 0};
 	int r = 0;
 	uint32_t tmp;
-	//static node_value_t *nv; 
 
 	while(1) {
 		left=sizeof(cmd);
@@ -691,122 +696,86 @@ static void *command_worker(void *arg)
 				pthread_exit(NULL);
 			}
 		}
-		
-		/*
-		if (cmd.cmd > 0 && cmd.cmd < 0x0f) 
-		{
-			pthread_mutex_lock(&pub_cond_lock);
-			nv = (node_value_t *) malloc(sizeof(node_value_t));
-			nv->cmd = cmd.cmd-1;
-			nv->param = ntohl(cmd.param);
-			enqueue(&rp->fifo_cmds, nv);
-			pthread_cond_signal(&pub_cond);
-		}
-			*/
-
-		pthread_mutex_lock(&pub_cond_lock);
+		printf("COMMAND\n");
 		switch(cmd.cmd) {
 		case 0x01:
-			rp->frequency = ntohl(cmd.param);
-			printf("set freq %d\n", rp->frequency);
-			rtlsdr_set_center_freq(dev,rp->frequency);
-			enqueue(my_queue, 1, ntohl(cmd.param));
-			pthread_cond_signal(&pub_cond);
+			printf("set freq AAAA%d\n", ntohl(cmd.param));
+			rtlsdr_set_center_freq(dev,ntohl(cmd.param));
+			pthread_mutex_lock(&param_lock);
+			rtl_p->frequency = ntohl(cmd.param);
+			pthread_mutex_unlock(&param_lock);
 			break;
 		case 0x02:
-			rp->samp_rate = ntohl(cmd.param);
-			printf("set sample rate %d\n", rp->samp_rate);
-			rtlsdr_set_sample_rate(dev, rp->samp_rate);
-			enqueue(my_queue, 2, ntohl(cmd.param));
-			pthread_cond_signal(&pub_cond);
+			//rp->samp_rate = ntohl(cmd.param);
+			printf("set sample rate %d\n", ntohl(cmd.param));
+			rtlsdr_set_sample_rate(dev, ntohl(cmd.param));
 			break;
 		case 0x03:
-			rp->tuner_gain_mode = ntohl(cmd.param);
-			printf("set gain mode %d\n", rp->tuner_gain_mode);
-			rtlsdr_set_tuner_gain_mode(dev, rp->tuner_gain_mode);
-			enqueue(my_queue, 3, ntohl(cmd.param));
-			pthread_cond_signal(&pub_cond);
+			//rp->tuner_gain_mode = ntohl(cmd.param);
+			printf("set gain mode %d\n", ntohl(cmd.param));
+			rtlsdr_set_tuner_gain_mode(dev, ntohl(cmd.param));
 			break;
 		case 0x04:
-			rp->tuner_gain = ntohl(cmd.param);
-			printf("set gain %d\n", rp->tuner_gain);
-			rtlsdr_set_tuner_gain(dev, rp->tuner_gain);
-			enqueue(my_queue, 4, ntohl(cmd.param));
-			pthread_cond_signal(&pub_cond);
+			//rp->tuner_gain = ntohl(cmd.param);
+			printf("set gain %d\n", ntohl(cmd.param));
+			rtlsdr_set_tuner_gain(dev, ntohl(cmd.param));
 			break;
 		case 0x05:
-			rp->ppm_error = ntohl(cmd.param);
-			printf("set freq correction %d\n", rp->ppm_error);
-			rtlsdr_set_freq_correction(dev, rp->ppm_error);
-			enqueue(my_queue, 5, ntohl(cmd.param));
-			pthread_cond_signal(&pub_cond);
+	//		rp->ppm_error = ntohl(cmd.param);
+			printf("set freq correction %d\n", ntohl(cmd.param));
+			rtlsdr_set_freq_correction(dev, ntohl(cmd.param));
 			break;
 		case 0x06:
 			tmp = ntohl(cmd.param);
 			printf("set if stage %d gain %d\n", tmp >> 16, (short)(tmp & 0xffff));
 			rtlsdr_set_tuner_if_gain(dev, tmp >> 16, (short)(tmp & 0xffff));
-			enqueue(my_queue, 6, ntohl(cmd.param));
-			pthread_cond_signal(&pub_cond);
 			break;
 		case 0x07:
 			printf("set test mode %d\n", ntohl(cmd.param));
 			rtlsdr_set_testmode(dev, ntohl(cmd.param));
-			enqueue(my_queue, 7, ntohl(cmd.param));
-			pthread_cond_signal(&pub_cond);
 			break;
 		case 0x08:
-			rp->agc_mode = ntohl(cmd.param);
-			printf("set agc mode %d\n", rp->agc_mode);
-			rtlsdr_set_agc_mode(dev, rp->agc_mode);
-			enqueue(my_queue, 8, ntohl(cmd.param));
-			pthread_cond_signal(&pub_cond);			
+			//rp->agc_mode = ntohl(cmd.param);
+			printf("set agc mode %d\n", ntohl(cmd.param));
+			rtlsdr_set_agc_mode(dev, ntohl(cmd.param));
 			break;
 		case 0x09:
-			rp->direct_sampling = ntohl(cmd.param);
-			printf("set direct sampling %d\n", rp->direct_sampling);
-			rtlsdr_set_direct_sampling(dev, rp->direct_sampling);
-			enqueue(my_queue, 9, ntohl(cmd.param));
-			pthread_cond_signal(&pub_cond);				
+			//rp->direct_sampling = ntohl(cmd.param);
+			printf("set direct sampling %d\n", ntohl(cmd.param));
+			rtlsdr_set_direct_sampling(dev, ntohl(cmd.param));
 			break;
 		case 0x0a:
-			rp->offset_tuning = ntohl(cmd.param);
-			printf("set offset tuning %d\n", rp->offset_tuning);
-			rtlsdr_set_offset_tuning(dev, rp->offset_tuning);
-			enqueue(my_queue, 10, ntohl(cmd.param));
-			pthread_cond_signal(&pub_cond);	
+//			rp->offset_tuning = ntohl(cmd.param);
+			printf("set offset tuning %d\n", ntohl(cmd.param));
+			rtlsdr_set_offset_tuning(dev, ntohl(cmd.param));
+;	
 			break;
 		case 0x0b:
-			rp->rtl_xtal_freq = ntohl(cmd.param);
-			printf("set rtl xtal %d\n", rp->rtl_xtal_freq);
-			rtlsdr_set_xtal_freq(dev, rp->rtl_xtal_freq, 0);
-			enqueue(my_queue, 11, ntohl(cmd.param));
-			pthread_cond_signal(&pub_cond);	
+//			rp->rtl_xtal_freq = ntohl(cmd.param);
+			printf("set rtl xtal %d\n", ntohl(cmd.param));
+			rtlsdr_set_xtal_freq(dev, ntohl(cmd.param), 0);
 			break;
 		case 0x0c:
-			rp->tuner_xtal_freq = ntohl(cmd.param);
-			printf("set tuner xtal %d\n", rp->tuner_xtal_freq);
-			rtlsdr_set_xtal_freq(dev, 0, rp->tuner_xtal_freq);
-			enqueue(my_queue, 12, ntohl(cmd.param));
-			pthread_cond_signal(&pub_cond);	
+//			rp->tuner_xtal_freq = ntohl(cmd.param);
+			printf("set tuner xtal %d\n", ntohl(cmd.param));
+			rtlsdr_set_xtal_freq(dev, 0, ntohl(cmd.param));
 			break;
 		case 0x0d:
 			printf("set tuner gain by index %d\n", ntohl(cmd.param));
 			set_gain_by_index(dev, ntohl(cmd.param));
-			enqueue(my_queue, 13, ntohl(cmd.param));
-			pthread_cond_signal(&pub_cond);				
 			break;
 		case 0x0e:
-			rp->enable_biastee = ntohl(cmd.param);
-			printf("set bias tee %d\n", rp->enable_biastee);
-			rtlsdr_set_bias_tee(dev, (int)rp->enable_biastee);
-			enqueue(my_queue, 14, ntohl(cmd.param));
-			pthread_cond_signal(&pub_cond);	
+//			rp->enable_biastee = ntohl(cmd.param);
+			printf("set bias tee %d\n", ntohl(cmd.param));
+			rtlsdr_set_bias_tee(dev, (int)ntohl(cmd.param));
 			break;
 		default:
 			break;
-		}
+		}	
+
+		printf("ENQUEUE %d %d\n", cmd.cmd,ntohl(cmd.param));
+		enqueue(my_queue,cmd.cmd,ntohl(cmd.param));		
 		cmd.cmd = 0xff;
-		pthread_mutex_unlock(&pub_cond_lock);
 	}
 }
 
@@ -835,7 +804,7 @@ int main(int argc, char **argv)
 	u_long blockmode = 1;
 	dongle_info_t dongle_info;
 	int rc;
-	//node_value_t *nv;
+
 
 #ifdef _WIN32
 	WSADATA wsd;
@@ -844,57 +813,69 @@ int main(int argc, char **argv)
 	struct sigaction sigact, sigign;
 #endif
 
-	//Radio params initialization
-	rp = (radio_params_t*) malloc(sizeof(radio_params_t)); 
-	rp->frequency = 100000000;
-	rp->samp_rate = 2048000;
-	rp->agc_mode = 0;
-	rp->enable_biastee = 0;
-	rp->client_ip = "0.0.0.0";
-	rp->dev_index = 0;
-	rp->dev_name = "";
-	rp->direct_sampling = 0;
-	rp->gain_by_index = 0;
-	rp->offset_tuning = 0;
-	rp->op_state = UNKNOW;
-	rp->ppm_error = 0;
-	rp->tuner_gain = 0;
-	rp->tuner_gain_mode = 0;
-	rp->rtl_xtal_freq = 0;
-	rp->tuner_xtal_freq = 0;
-	rp->addr = "192.168.1.6";
-	rp->port = "1234";
-	rp->mqtt_uri = "tcp://192.168.1.11:1883";
-	rp->mqtt_topic = "home/rtl_tcp/radio1";
-	rp->mqtt_tele_topic="home/rtl_tcp/radio1/tele/STATE";
-	rp->mqtt_stat_topic="home/rtl_tcp/radio1/stat";
-	rp->mqtt_lwt_topic="home/rtl_tcp/radio1/tele/LWT";
-	rp->mqtt_client_id = "Client_1234";
-	rp->mqtt_qos = 1;
-	rp->mqtt_tele_period = 10;
-	//rp->fifo_cmds = NULL;
+	//RTL params initialization
+	rtl_p = (rtl_params_t*) malloc(sizeof(rtl_params_t)); 
+	rtl_p->frequency = 100000000;
+	rtl_p->samp_rate = 2048000;
+	rtl_p->agc_mode = 0;
+	rtl_p->enable_biastee = 0;
+	rtl_p->direct_sampling = 0;
+	rtl_p->gain_by_index = 0;
+	rtl_p->offset_tuning = 0;
+	rtl_p->ppm_error = 0;
+	rtl_p->tuner_gain = 0;
+	rtl_p->tuner_gain_mode = 0;
+	rtl_p->rtl_xtal_freq = 0;
+	rtl_p->tuner_xtal_freq = 0;
+
+
+	//Device info init
+	di_p = (device_info_t*) malloc(sizeof(device_info_t)); 
+	di_p->index = -1;
+	di_p->name = NULL;
+	di_p->product = NULL;
+	di_p->serial = NULL;
+	di_p->vendor = NULL;
+
+	//Server params init
+	server_p = (server_params_t*) malloc(sizeof(server_params_t)); 
+	server_p->addr = "192.168.1.6";
+	server_p->port = "1234";
+	server_p->client_ip = "0.0.0.0";
+
+	//MQTT params init
+	mqtt_p = (mqtt_params_t*) malloc(sizeof(mqtt_params_t)); 
+	mqtt_p->uri = "tcp://192.168.1.11:1883";
+	mqtt_p->base_topic = "home/rtl_tcp/radio1";
+	mqtt_p->tele_topic="home/rtl_tcp/radio1/tele/STATE";
+	mqtt_p->stat_topic="home/rtl_tcp/radio1/stat";
+	mqtt_p->lwt_topic="home/rtl_tcp/radio1/tele/LWT";
+	mqtt_p->client_id = "Client_1234";
+	mqtt_p->qos = 1;
+	mqtt_p->tele_period = 10;
+
 
 
 	while ((opt = getopt(argc, argv, "a:p:f:g:s:b:n:d:P:T:h:t:c:y")) != -1) {
 		switch (opt) {
 		case 'd':
-			rp->dev_index = verbose_device_search(optarg);
+			di_p->index = verbose_device_search(optarg);
 			dev_given = 1;
 			break;
 		case 'f':
-			rp->frequency = (uint32_t)atofs(optarg);
+			rtl_p->frequency = (uint32_t)atofs(optarg);
 			break;
 		case 'g':
-			rp->tuner_gain = (int)(atof(optarg) * 10); /* tenths of a dB */
+			rtl_p->tuner_gain = (int)(atof(optarg) * 10); /* tenths of a dB */
 			break;
 		case 's':
-			rp->samp_rate  = (uint32_t)atofs(optarg);
+			rtl_p->samp_rate  = (uint32_t)atofs(optarg);
 			break;
 		case 'a':
-		    rp->addr = strdup(optarg);
+		    server_p->addr = strdup(optarg);
 			break;
 		case 'p':
-		    rp->port = strdup(optarg);
+		    server_p->port = strdup(optarg);
 			break;
 		case 'b':
 			buf_num = atoi(optarg);
@@ -903,28 +884,28 @@ int main(int argc, char **argv)
 			llbuf_num = atoi(optarg);
 			break;
 		case 'P':
-			rp->ppm_error = atoi(optarg);
+			rtl_p->ppm_error = atoi(optarg);
 			break;
 		case 'T':
-			rp->enable_biastee = 1;
+			rtl_p->enable_biastee = 1;
 			break;
 		case 'h':
-			rp->mqtt_uri = strdup(optarg);
+			mqtt_p->uri = strdup(optarg);
 			break;
 		case 't':
-			rp->mqtt_topic = strdup(optarg);
-			rp->mqtt_tele_topic = strdup(optarg);
-			rp->mqtt_stat_topic = strdup(optarg);
-			rp->mqtt_lwt_topic = strdup(optarg);
-			strcat(rp->mqtt_tele_topic, "/tele/STATE");
-			strcat(rp->mqtt_lwt_topic, "/tele/LWT");
-			strcat(rp->mqtt_stat_topic, "/stat");
+			mqtt_p->base_topic = strdup(optarg);
+			mqtt_p->tele_topic = strdup(optarg);
+			mqtt_p->stat_topic = strdup(optarg);
+			mqtt_p->lwt_topic = strdup(optarg);
+			strcat(mqtt_p->tele_topic, "/tele/STATE");
+			strcat(mqtt_p->lwt_topic, "/tele/LWT");
+			strcat(mqtt_p->stat_topic, "/stat");
 			break;
 		case 'c':
-			rp->mqtt_client_id = strdup(optarg);
+			mqtt_p->client_id = strdup(optarg);
 			break;
 		case 'y':
-			rp->mqtt_tele_period = atoi(optarg);
+			mqtt_p->tele_period = atoi(optarg);
 			break;				
 		default:
 			usage();
@@ -936,16 +917,16 @@ int main(int argc, char **argv)
 		usage();
 
 	if (!dev_given) {
-		rp->dev_index = verbose_device_search("0");
+		di_p->index = verbose_device_search("0");
 	}
 
-	if (rp->dev_index < 0) {
+	if (di_p->index < 0) {
 	    exit(1);
 	}
 
-	rtlsdr_open(&dev, (uint32_t)rp->dev_index);
+	rtlsdr_open(&dev, (uint32_t)di_p->index);
 	if (NULL == dev) {
-		fprintf(stderr, "Failed to open rtlsdr device #%d.\n", rp->dev_index);
+		fprintf(stderr, "Failed to open rtlsdr device #%d.\n", di_p->index);
 		exit(1);
 	}
 
@@ -963,21 +944,21 @@ int main(int argc, char **argv)
 #endif
 
 	/* Set the tuner error */
-	verbose_ppm_set(dev, rp->ppm_error);
+	verbose_ppm_set(dev, rtl_p->ppm_error);
 
 	/* Set the sample rate */
-	r = rtlsdr_set_sample_rate(dev, rp->samp_rate);
+	r = rtlsdr_set_sample_rate(dev, rtl_p->samp_rate);
 	if (r < 0)
 		fprintf(stderr, "WARNING: Failed to set sample rate.\n");
 
 	/* Set the frequency */
-	r = rtlsdr_set_center_freq(dev, rp->frequency);
+	r = rtlsdr_set_center_freq(dev, rtl_p->frequency);
 	if (r < 0)
 		fprintf(stderr, "WARNING: Failed to set center freq.\n");
 	else
-		fprintf(stderr, "Tuned to %i Hz.\n", rp->frequency);
+		fprintf(stderr, "Tuned to %i Hz.\n", rtl_p->frequency);
 
-	if (0 == rp->tuner_gain) {
+	if (0 == rtl_p->tuner_gain) {
 		 /* Enable automatic gain */
 		r = rtlsdr_set_tuner_gain_mode(dev, 0);
 		if (r < 0)
@@ -989,15 +970,15 @@ int main(int argc, char **argv)
 			fprintf(stderr, "WARNING: Failed to enable manual gain.\n");
 
 		/* Set the tuner gain */
-		r = rtlsdr_set_tuner_gain(dev, rp->tuner_gain);
+		r = rtlsdr_set_tuner_gain(dev, rtl_p->tuner_gain);
 		if (r < 0)
 			fprintf(stderr, "WARNING: Failed to set tuner gain.\n");
 		else
-			fprintf(stderr, "Tuner gain set to %f dB.\n", rp->tuner_gain/10.0);
+			fprintf(stderr, "Tuner gain set to %f dB.\n", rtl_p->tuner_gain/10.0);
 	}
 
-	rtlsdr_set_bias_tee(dev, rp->enable_biastee);
-	if (rp->enable_biastee)
+	rtlsdr_set_bias_tee(dev, rtl_p->enable_biastee);
+	if (rtl_p->enable_biastee)
 		fprintf(stderr, "activated bias-T on GPIO PIN 0\n");
 
 	/* Reset endpoint before we start reading from it (mandatory) */
@@ -1007,25 +988,24 @@ int main(int argc, char **argv)
 
 	pthread_mutex_init(&exit_cond_lock, NULL);
 	pthread_mutex_init(&ll_mutex, NULL);
-	pthread_mutex_init(&exit_cond_lock, NULL);
-
-	pthread_mutex_init(&pub_cond_lock,NULL);
+	pthread_mutex_init(&param_lock,NULL);
 
 	pthread_cond_init(&cond, NULL);
 	pthread_cond_init(&exit_cond, NULL);
+
 
 	hints.ai_flags  = AI_PASSIVE; /* Server mode. */
 	hints.ai_family = PF_UNSPEC;  /* IPv4 or IPv6. */
 	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_protocol = IPPROTO_TCP;
 
-	if ((aiErr = getaddrinfo(rp->addr,
-				 rp->port,
+	if ((aiErr = getaddrinfo(server_p->addr,
+				 server_p->port,
 				 &hints,
 				 &aiHead )) != 0)
 	{
 		fprintf(stderr, "local address %s ERROR - %s.\n",
-		        rp->addr, gai_strerror(aiErr));
+		        server_p->addr, gai_strerror(aiErr));
 		return(-1);
 	}
 	memcpy(&local, aiHead->ai_addr, aiHead->ai_addrlen);
@@ -1052,15 +1032,15 @@ int main(int argc, char **argv)
 	}
 
 	// populate device info 
-	rp->dev_vendor = malloc(sizeof(char) * 256);
-	rp->dev_product = malloc(sizeof(char) * 256);
-	rp->dev_serial= malloc(sizeof(char) * 256);
-	rtlsdr_get_device_usb_strings(rp->dev_index, rp->dev_vendor, rp->dev_product, rp->dev_serial);
-	rp->dev_name= malloc(sizeof(char) * 256);
-	strcpy(rp->dev_name, rtlsdr_get_device_name((uint32_t)rp->dev_index));
+	di_p->vendor = malloc(sizeof(char) * 256);
+	di_p->product = malloc(sizeof(char) * 256);
+	di_p->serial= malloc(sizeof(char) * 256);
+	rtlsdr_get_device_usb_strings(di_p->index, di_p->vendor, di_p->product, di_p->serial);
+	di_p->name= malloc(sizeof(char) * 256);
+	strcpy(di_p->name, rtlsdr_get_device_name((uint32_t)di_p->index));
 
 	
-	if ((rc = MQTTClient_create(&mqtt_client, rp->mqtt_uri, rp->mqtt_client_id,
+	if ((rc = MQTTClient_create(&mqtt_client, mqtt_p->uri, mqtt_p->client_id,
         MQTTCLIENT_PERSISTENCE_NONE, NULL)) != MQTTCLIENT_SUCCESS)
     {
          fprintf(stderr, "Failed to create MQTT client, return code %d\n", rc);
@@ -1134,36 +1114,11 @@ int main(int argc, char **argv)
 		r = pthread_create(&command_thread, &attr, command_worker, NULL);
 		pthread_attr_destroy(&attr);
 
-		
-		/*
-		nv = (node_value_t *) malloc(sizeof(node_value_t));
-		nv->cmd = 0xfe;
-		nv->param = 0;
-		pthread_mutex_lock(&pub_cond_lock);
-		rp->op_state = RUNNING;
-		rp->client_ip = remhostinfo;
-		enqueue(&rp->fifo_cmds, nv);
-		pthread_cond_signal(&pub_cond);
-		pthread_mutex_unlock(&pub_cond_lock);
-		*/
-
 		r = rtlsdr_read_async(dev, rtlsdr_callback, NULL, buf_num, 0);
 
 		pthread_join(tcp_worker_thread, &status);
 		pthread_join(command_thread, &status);
 		
-		//pthread_mutex_lock(&pub_cond_lock);
-		/*
-		nv = (node_value_t *) malloc(sizeof(node_value_t));
-		nv->cmd = 0xfe;
-		nv->param = 0;
-		pthread_mutex_lock(&pub_cond_lock);
-		rp->op_state = IDLE;
-		rp->client_ip = remhostinfo;
-		enqueue(&rp->fifo_cmds, nv);
-		pthread_cond_signal(&pub_cond);
-		pthread_mutex_unlock(&pub_cond_lock);
-		*/		
 		closesocket(s);
 
 		printf("TCP and Command threads dead..\n");
@@ -1183,21 +1138,6 @@ int main(int argc, char **argv)
 out:
 
 	//Wait MQTT Worker thread for exit
-/*
-	nv = (node_value_t *) malloc(sizeof(node_value_t));
-	nv->cmd = 0xfe;
-	nv->param = 0;
-	pthread_mutex_lock(&pub_cond_lock);
-	rp->op_state = UNKNOW;
-	rp->client_ip = remhostinfo;
-	enqueue(&rp->fifo_cmds, nv);
-	pthread_cond_signal(&pub_cond);
-	pthread_mutex_unlock(&pub_cond_lock);
-*/
-//	sleep(1);
-
-
-
 	do_mqtt_exit = 1;
 	pthread_join(mqtt_worker_thread, &status);
     MQTTClient_destroy(&mqtt_client);
@@ -1205,6 +1145,13 @@ out:
 	rtlsdr_close(dev);
 	closesocket(listensocket);
 	closesocket(s);
+
+	free(mqtt_p);
+	free(server_p);
+	free(rtl_p);
+	free(di_p);
+	
+
 #ifdef _WIN32
 	WSACleanup();
 #endif
