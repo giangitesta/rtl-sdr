@@ -696,10 +696,10 @@ static void *command_worker(void *arg)
 				pthread_exit(NULL);
 			}
 		}
-		printf("COMMAND\n");
+
 		switch(cmd.cmd) {
 		case 0x01:
-			printf("set freq AAAA%d\n", ntohl(cmd.param));
+			printf("set freq %d\n", ntohl(cmd.param));
 			rtlsdr_set_center_freq(dev,ntohl(cmd.param));
 			pthread_mutex_lock(&param_lock);
 			rtl_p->frequency = ntohl(cmd.param);
@@ -773,7 +773,6 @@ static void *command_worker(void *arg)
 			break;
 		}	
 
-		printf("ENQUEUE %d %d\n", cmd.cmd,ntohl(cmd.param));
 		enqueue(my_queue,cmd.cmd,ntohl(cmd.param));		
 		cmd.cmd = 0xff;
 	}
