@@ -381,6 +381,21 @@ void rtlsdr_callback(unsigned char *buf, uint32_t len, void *ctx)
 }
 
 
+static int publishMessage(char *topic, char* payload)
+{
+	int rc;
+	MQTTClient_message pubmsg = MQTTClient_message_initializer;
+  	MQTTClient_deliveryToken token;
+
+	pubmsg.payload = payload;
+	pubmsg.payloadlen = strlen(payload);
+	pubmsg.qos = 0;
+	pubmsg.retained = 0;
+
+	rc = MQTTClient_publishMessage(mqtt_client, topic, &pubmsg, &token);
+	return (rc);	
+}
+
 static int publishLastWillTestamentMessage(char* lwt_topic, char* payload)
 {
 	MQTTClient_message pubmsg = MQTTClient_message_initializer;
@@ -397,7 +412,7 @@ static int publishLastWillTestamentMessage(char* lwt_topic, char* payload)
 	return (rc);
 }
 
-int publishStatMessage(char *topic, unsigned char cmd, unsigned int param)
+static int publishStatMessage(char *topic, unsigned char cmd, unsigned int param)
 {
 
 	char *stat_topics[] = {"/FREQ","/SAMP_RATE",
@@ -415,10 +430,6 @@ int publishStatMessage(char *topic, unsigned char cmd, unsigned int param)
 	strcat(stat_topic, stat_topics[cmd-1]);
 	payload = malloc(sizeof(char)*255);
 	sprintf(payload, "%u", param);
-	pubmsg.payload = payload;
-	pubmsg.payloadlen = strlen(payload);
-	pubmsg.qos = 0;
-	pubmsg.retained = 0;
 	rc = publishMessage(stat_topic , payload);
 	printf("stat: %s - %s\n", stat_topic, payload);
 	free(payload);
@@ -427,22 +438,14 @@ int publishStatMessage(char *topic, unsigned char cmd, unsigned int param)
 }
 
 
-void createTelemetryPayload(char **payload)
+static void createTelemetryPayload(char **payload)
 {
 
 	pthread_mutex_lock(&param_lock);
 
 	*payload =  malloc(sizeof(char) * 2048);
 	sprintf (*payload, 
-  	        "{ \"dev_id\" : %d,
-			  \"dev_name\" : \"%s\",
-			  \"dev_serial\" : \"%s\", 
-			  \"client_ip\" : \"%s\", 
-			  \"frequency\" : %u, 
-			  \"agc_mode\" : %d, 
-			  \"gain\" : %d, 
-			  \"sample rate\" : %u, 
-			  \"ppm error\" : %d }", 
+  	        "{ \"dev_id\" : %d, \"dev_name\" : \"%s\", \"dev_serial\" : \"%s\", \"client_ip\" : \"%s\", \"frequency\" : %u, \"agc_mode\" : %d, \"gain\" : %d, \"sample rate\" : %u, \"ppm error\" : %d }", 
 			   di_p->index,
 			   di_p->name,
 			   di_p->serial,
@@ -456,19 +459,7 @@ void createTelemetryPayload(char **payload)
 }
 
 
-static int publishMessage(char *topic, char* payload)
-{
-	MQTTClient_message pubmsg = MQTTClient_message_initializer;
-  	MQTTClient_deliveryToken token;
 
-	pubmsg.payload = payload;
-	pubmsg.payloadlen = strlen(payload);
-	pubmsg.qos = 0;
-	pubmsg.retained = 0;
-
-	rc = MQTTClient_publishMessage(mqtt_client, rp->mqtt_tele_topic, &pubmsg, &token);
-	return (rc);	
-}
 
 static void *mqtt_worker(void *arg)
 {
