@@ -64,9 +64,6 @@ static pthread_t mqtt_worker_thread;
 static pthread_t tcp_worker_thread;
 static pthread_t command_thread;
 
-//static pthread_cond_t pub_cond;
-//static pthread_mutex_t pub_cond_lock;
-
 static pthread_mutex_t param_lock;
 
 static pthread_cond_t exit_cond;
@@ -89,14 +86,12 @@ typedef struct { /* structure size must be multiple of 2 bytes */
 
 static rtlsdr_dev_t *dev = NULL;
 
-
 static int global_numq = 0;
 static struct llist *ll_buffers = 0;
 static int llbuf_num = 500;
 
 static volatile int do_exit = 0;
 static volatile int do_mqtt_exit = 0;
-
 
 typedef struct command_msg {
 	unsigned char cmd;
@@ -270,7 +265,7 @@ typedef struct {
 static rtl_params_t *rtl_p = NULL;
 static mqtt_params_t *mqtt_p = NULL;
 static server_params_t *server_p = NULL;
-static device_info_t *di_p = NULL;
+static device_info_t *di_p = NULL; // device info struct pointer
 
 static MQTTClient mqtt_client;
 
@@ -296,9 +291,6 @@ void usage(void)
 		"\t[-y Mqtt Telemetry period\n");
 	exit(1);
 }
-
-
-
 
 
 #ifdef _WIN32
@@ -405,72 +397,9 @@ static int publishLastWillTestamentMessage(char* lwt_topic, char* payload)
 	return (rc);
 }
 
-
-/*
-void createTelemetryPayload(radio_params_t* rp, char **payload)
+int publishStatMessage(char *topic, unsigned char cmd, unsigned int param)
 {
 
-	char op[255];
-	switch(rp->op_state)
-	{
-		case UNKNOW:
-			strcpy(op,"UNKNOW");
-			break;
-		case IDLE:
-			strcpy(op, "WAITING");
-			break;
-		case RUNNING:
-			strcpy(op, "RUNNING");
-			break;
-		default:
-			strcpy(op, "");
-	};
-
-
-	*payload =  malloc(sizeof(char) * 2048);
-	sprintf (*payload, 
-  	        "{ \"dev_id\" : %d,\"dev_name\" : \"%s\",\"dev_serial\" : \"%s\", \"client_ip\" : \"%s\", \"op_mode\" : \"%s\", \"frequency\" : %u, \"agc_mode\" : %d, \"gain\" : %d, \"sample rate\" : %u, \"ppm error\" : %d }", 
-			   rp->dev_index,
-			   rp->dev_name,
-			   rp->dev_serial,
-			   rp->client_ip,
-			   op,
-			   rp->frequency,
-			   rp->tuner_gain_mode,
-			   rp->tuner_gain, 
-			   rp->samp_rate,
-			   rp->ppm_error);
-}
-*/
-
-
-/*
-static int publishTelemetryMessage(radio_params_t *rp)
-{
-	MQTTClient_message pubmsg = MQTTClient_message_initializer;
-  	MQTTClient_deliveryToken token;
-	
-	char *payload="";
-	int rc;
-
-	createTelemetryPayload(rp,&payload);
-	pubmsg.payload = payload;
-	pubmsg.payloadlen = strlen(payload);
-	pubmsg.qos = 0;
-	pubmsg.retained = 0;				
-	
-	rc = MQTTClient_publishMessage(mqtt_client, rp->mqtt_tele_topic, &pubmsg, &token);
-	//printf("Telemetry\n");
-	free(payload);
-	return (rc);
-}
-*/
-/*
-int publishStatMessage(char *topic, node_value_t *nv)
-{
-	MQTTClient_message pubmsg = MQTTClient_message_initializer;
-  	MQTTClient_deliveryToken token;
-	
 	char *stat_topics[] = {"/FREQ","/SAMP_RATE",
 						   "/GAIN_MODE","/GAIN",
 						   "/PPM_ERR","/IF_GAIN",
@@ -483,36 +412,73 @@ int publishStatMessage(char *topic, node_value_t *nv)
 	char *payload="";
 
 	stat_topic = strdup(topic);
-	strcat(stat_topic, stat_topics[nv->cmd]);
+	strcat(stat_topic, stat_topics[cmd-1]);
 	payload = malloc(sizeof(char)*255);
-	sprintf(payload, "%u", nv->param);
+	sprintf(payload, "%u", param);
 	pubmsg.payload = payload;
 	pubmsg.payloadlen = strlen(payload);
 	pubmsg.qos = 0;
 	pubmsg.retained = 0;
-	rc = MQTTClient_publishMessage(mqtt_client, stat_topic, &pubmsg, &token);
-	printf("STAT: %s - %s\n", stat_topic, payload);
+	rc = publishMessage(stat_topic , payload);
+	printf("stat: %s - %s\n", stat_topic, payload);
 	free(payload);
 	
 	return (rc);
 }
-*/
 
 
+void createTelemetryPayload(char **payload)
+{
+
+	pthread_mutex_lock(&param_lock);
+
+	*payload =  malloc(sizeof(char) * 2048);
+	sprintf (*payload, 
+  	        "{ \"dev_id\" : %d,
+			  \"dev_name\" : \"%s\",
+			  \"dev_serial\" : \"%s\", 
+			  \"client_ip\" : \"%s\", 
+			  \"frequency\" : %u, 
+			  \"agc_mode\" : %d, 
+			  \"gain\" : %d, 
+			  \"sample rate\" : %u, 
+			  \"ppm error\" : %d }", 
+			   di_p->index,
+			   di_p->name,
+			   di_p->serial,
+			   server_p->client_ip,
+			   rtl_p->frequency,
+			   rtl_p->tuner_gain_mode,
+			   rtl_p->tuner_gain, 
+			   rtl_p->samp_rate,
+			   rtl_p->ppm_error);
+	pthread_mutex_unlock(&param_lock);				   
+}
+
+
+static int publishMessage(char *topic, char* payload)
+{
+	MQTTClient_message pubmsg = MQTTClient_message_initializer;
+  	MQTTClient_deliveryToken token;
+
+	pubmsg.payload = payload;
+	pubmsg.payloadlen = strlen(payload);
+	pubmsg.qos = 0;
+	pubmsg.retained = 0;
+
+	rc = MQTTClient_publishMessage(mqtt_client, rp->mqtt_tele_topic, &pubmsg, &token);
+	return (rc);	
+}
 
 static void *mqtt_worker(void *arg)
 {
 
-	u_int32_t appo_freq = 0;
-	
-	//struct timeval tv= {1,0};
-	//struct timespec ts;
-	//struct timeval tp;
-	int r = 0;
+	int r = 0, rc = 0;
 	char *payload="";
-	int rc;
-
+	
 	char* lwt_topic;
+	char* stat_topic;
+	char* tele_topic;
 	int tele_period;
 	unsigned char q_cmd;
 	unsigned int q_param;
@@ -522,8 +488,11 @@ static void *mqtt_worker(void *arg)
 	MQTTClient_connectOptions mqtt_conn_opts = { {'M', 'Q', 'T', 'C'}, 8, 60, 1, 1, NULL, NULL, NULL, 30, 0, NULL,\
 												   0, NULL, MQTTVERSION_DEFAULT, {NULL, 0, 0}, {0, NULL}, -1, 0, NULL, NULL, NULL };
 	
+
 	pthread_mutex_lock(&param_lock);
+	tele_topic = strdup(mqtt_p->tele_topic);
 	lwt_topic = strdup(mqtt_p->lwt_topic);
+	stat_topic = strdup(mqtt_p->stat_topic);
 	tele_period = mqtt_p->tele_period;
 	pthread_mutex_unlock(&param_lock);
 
@@ -545,10 +514,11 @@ static void *mqtt_worker(void *arg)
 
 	publishLastWillTestamentMessage(lwt_topic, "Online");
 
-	//pthread_mutex_lock(&pub_cond_lock);
-	//publishTelemetryMessage(rp);
-	//pthread_mutex_unlock(&pub_cond_lock);
-	printf("INITIAL TELEMETRY\n");
+	printf("Send Initial Telemetry message\n");
+	createTelemetryPayload(&payload);
+	publishMessage(tele_topic, payload);
+	free(payload);
+	
 	
 	while(1) {
 		if(do_mqtt_exit) {
@@ -560,20 +530,24 @@ static void *mqtt_worker(void *arg)
 		}
 		
 		/*
-			Attende il signal dal Command Worker nel caso ci siano comandi da notificare sul topic Stat
 			Il timeout impostato equivale al tele_period in modo da effettuare la pubblicazione del topic tele a cadenza regolare
+			In caso il Command thread processi comandi dal client vengono inseriti in coda e poi inviati i relativi messaggi MQTT 
 		*/
-
 		r = dequeue_with_timeout(my_queue, tele_period, &q_cmd, &q_param);
 
 		switch (r) {
 			case 0: //send COMMAND UPDATE
-				printf("SEND COMMAND\n");
-				//publishStatMessage(rp->mqtt_stat_topic, nv);
+				printf("Send Stat message update\n");
+				publishStatMessage(stat_topic, q_cmd, q_param);
 				break;
 			case 1: //send TELEMETRY
-				printf("SEND TELEMETRY\n");
-				//publishTelemetryMessage(rp);
+				printf("Send Telemetry message\n");
+				createTelemetryPayload(&payload);
+				publishMessage(tele_topic, payload);
+				free(payload);
+				break;
+			case 2: //TO DO: eliminare dopo la verifica che se la coda è vuota non si presanta il signal
+				printf("Coda vuota?\n");
 				break;
 			default:
 				break;
@@ -706,24 +680,32 @@ static void *command_worker(void *arg)
 			pthread_mutex_unlock(&param_lock);
 			break;
 		case 0x02:
-			//rp->samp_rate = ntohl(cmd.param);
 			printf("set sample rate %d\n", ntohl(cmd.param));
 			rtlsdr_set_sample_rate(dev, ntohl(cmd.param));
+			pthread_mutex_lock(&param_lock);
+			rtl_p->samp_rate = ntohl(cmd.param);
+			pthread_mutex_unlock(&param_lock);
 			break;
 		case 0x03:
-			//rp->tuner_gain_mode = ntohl(cmd.param);
 			printf("set gain mode %d\n", ntohl(cmd.param));
 			rtlsdr_set_tuner_gain_mode(dev, ntohl(cmd.param));
+			pthread_mutex_lock(&param_lock);
+			rtl_p->tuner_gain_mode = ntohl(cmd.param);
+			pthread_mutex_unlock(&param_lock);
 			break;
 		case 0x04:
-			//rp->tuner_gain = ntohl(cmd.param);
 			printf("set gain %d\n", ntohl(cmd.param));
 			rtlsdr_set_tuner_gain(dev, ntohl(cmd.param));
+			pthread_mutex_lock(&param_lock);
+			rtl_p->tuner_gain = ntohl(cmd.param);
+			pthread_mutex_unlock(&param_lock);
 			break;
 		case 0x05:
-	//		rp->ppm_error = ntohl(cmd.param);
 			printf("set freq correction %d\n", ntohl(cmd.param));
 			rtlsdr_set_freq_correction(dev, ntohl(cmd.param));
+			pthread_mutex_lock(&param_lock);
+			rtl_p->ppm_error = ntohl(cmd.param);
+			pthread_mutex_unlock(&param_lock);
 			break;
 		case 0x06:
 			tmp = ntohl(cmd.param);
@@ -735,39 +717,50 @@ static void *command_worker(void *arg)
 			rtlsdr_set_testmode(dev, ntohl(cmd.param));
 			break;
 		case 0x08:
-			//rp->agc_mode = ntohl(cmd.param);
 			printf("set agc mode %d\n", ntohl(cmd.param));
 			rtlsdr_set_agc_mode(dev, ntohl(cmd.param));
+			pthread_mutex_lock(&param_lock);
+			rtl_p->agc_mode = ntohl(cmd.param);
+			pthread_mutex_unlock(&param_lock);
 			break;
 		case 0x09:
-			//rp->direct_sampling = ntohl(cmd.param);
 			printf("set direct sampling %d\n", ntohl(cmd.param));
 			rtlsdr_set_direct_sampling(dev, ntohl(cmd.param));
+			pthread_mutex_lock(&param_lock);
+			rtl_p->direct_sampling = ntohl(cmd.param);
+			pthread_mutex_unlock(&param_lock);			
 			break;
 		case 0x0a:
-//			rp->offset_tuning = ntohl(cmd.param);
 			printf("set offset tuning %d\n", ntohl(cmd.param));
 			rtlsdr_set_offset_tuning(dev, ntohl(cmd.param));
-;	
+			pthread_mutex_lock(&param_lock);
+			rtl_p->offset_tuning = ntohl(cmd.param);
+			pthread_mutex_unlock(&param_lock);	
 			break;
 		case 0x0b:
-//			rp->rtl_xtal_freq = ntohl(cmd.param);
 			printf("set rtl xtal %d\n", ntohl(cmd.param));
 			rtlsdr_set_xtal_freq(dev, ntohl(cmd.param), 0);
+			pthread_mutex_lock(&param_lock);
+			rtl_p->rtl_xtal_freq = ntohl(cmd.param);
+			pthread_mutex_unlock(&param_lock);	
 			break;
 		case 0x0c:
-//			rp->tuner_xtal_freq = ntohl(cmd.param);
 			printf("set tuner xtal %d\n", ntohl(cmd.param));
 			rtlsdr_set_xtal_freq(dev, 0, ntohl(cmd.param));
+			pthread_mutex_lock(&param_lock);
+			rtl_p->tuner_xtal_freq = ntohl(cmd.param);
+			pthread_mutex_unlock(&param_lock);			
 			break;
 		case 0x0d:
 			printf("set tuner gain by index %d\n", ntohl(cmd.param));
 			set_gain_by_index(dev, ntohl(cmd.param));
 			break;
 		case 0x0e:
-//			rp->enable_biastee = ntohl(cmd.param);
 			printf("set bias tee %d\n", ntohl(cmd.param));
 			rtlsdr_set_bias_tee(dev, (int)ntohl(cmd.param));
+			pthread_mutex_lock(&param_lock);
+			rtl_p->enable_biastee = ntohl(cmd.param);
+			pthread_mutex_unlock(&param_lock);			
 			break;
 		default:
 			break;
